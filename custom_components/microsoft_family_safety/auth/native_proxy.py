@@ -14,6 +14,7 @@ import logging
 import contextvars
 import re
 import secrets
+import ssl
 from http.cookies import SimpleCookie
 from collections.abc import Mapping
 from typing import Any
@@ -25,12 +26,33 @@ from yarl import URL
 
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.httpx_client import create_async_httpx_client
+
+try:  # HA 2026.2+ buckets the cached client SSL contexts by ALPN protocol
+    from homeassistant.util.ssl import SSL_ALPN_HTTP11, client_context
+except ImportError:  # older cores have no alpn_protocols parameter
+    from homeassistant.util.ssl import client_context
+
+    SSL_ALPN_HTTP11 = None
 
 from ..api_client import _BOT_MANAGER_COOKIE_NAMES
 from ..const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _auth_ssl_context() -> ssl.SSLContext:
+    """Return the client SSL context for the auth proxy's httpx transport.
+
+    Home Assistant caches one context per (cipher list, ALPN) pair, and httpx
+    calls ``set_alpn_protocols()`` on whatever context it is handed.  Ask for
+    the HTTP/1.1 bucket - the same one ``create_async_httpx_client`` uses for a
+    non-HTTP/2 client - so that call is a no-op instead of mutating the shared
+    no-ALPN context that other integrations rely on.
+    """
+    if SSL_ALPN_HTTP11 is not None:
+        return client_context(alpn_protocols=SSL_ALPN_HTTP11)
+    return client_context()
+
 
 AUTH_PROXY_PATH = "/auth/microsoft_family_safety/proxy"
 AUTH_CALLBACK_PATH = "/auth/microsoft_family_safety/callback"
@@ -183,14 +205,24 @@ class MicrosoftFamilyAuthProxy:
         self._discovered_hosts: set[str] = set()
         if self._start_url.host and _is_allowed_host(self._start_url.host):
             self._discovered_hosts.add(self._start_url.host.lower())
-        # Create a dedicated HA-managed httpx client. Home Assistant provides
-        # a pre-built SSL context here, avoiding certifi/SSL filesystem work in
-        # the event loop while keeping a separate cookie jar for this auth flow.
-        # auto_cleanup=False because this short-lived proxy closes the client
-        # explicitly when the flow finishes/expires.
-        self._client = create_async_httpx_client(
-            hass,
-            auto_cleanup=False,
+        # Dedicated httpx client for this auth flow, with its own cookie jar.
+        # Built directly (not via create_async_httpx_client) so we can force
+        # IPv4: on hosts whose only IPv6 address is an unroutable ULA
+        # (fd00::/8), the default dual-stack client can end up raising
+        # httpx.ConnectError("All connection attempts failed"), aborting the
+        # config flow ("Invalid flow specified"). Binding the local socket to
+        # an IPv4 address makes the connector attempt A records only.
+        # verify must be set on the transport because httpx ignores
+        # client-level SSL settings when a custom transport is supplied;
+        # _auth_ssl_context() is Home Assistant's cached client SSL context, so
+        # no certifi/SSL filesystem work happens in the event loop. The proxy
+        # closes this client explicitly when the flow finishes/expires.
+        self._client = httpx.AsyncClient(
+            transport=httpx.AsyncHTTPTransport(
+                local_address="0.0.0.0",
+                verify=_auth_ssl_context(),
+                retries=1,
+            ),
             follow_redirects=False,
             timeout=httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0),
             headers={
@@ -371,10 +403,9 @@ class MicrosoftFamilyAuthProxy:
         self._expiry_task = None
         if task and task is not asyncio.current_task():
             task.cancel()
-        # create_async_httpx_client wraps instance.aclose() to warn integrations
-        # that close shared HA clients. This client is intentionally dedicated
-        # (auto_cleanup=False), so call the httpx class implementation directly.
-        await httpx.AsyncClient.aclose(self._client)
+        # This client is dedicated to one auth flow (a plain httpx.AsyncClient,
+        # not one of HA's shared/wrapped clients), so closing it here is safe.
+        await self._client.aclose()
 
     def _has_authenticated_cookie_set(self) -> bool:
         found = {cookie.name for cookie in self._client.cookies.jar}
