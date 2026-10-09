@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import secrets
+import ssl
 import time
 from http.cookies import SimpleCookie
 from collections.abc import Mapping
@@ -30,10 +31,32 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import UnknownFlow
 from homeassistant.helpers.httpx_client import create_async_httpx_client
 
+try:  # HA 2026.2+ buckets the cached client SSL contexts by ALPN protocol
+    from homeassistant.util.ssl import SSL_ALPN_HTTP11, client_context
+except ImportError:  # older cores have no alpn_protocols parameter
+    from homeassistant.util.ssl import client_context
+
+    SSL_ALPN_HTTP11 = None
+
 from ..api_client import _BOT_MANAGER_COOKIE_NAMES
 from ..const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _auth_ssl_context() -> ssl.SSLContext:
+    """Return the client SSL context for the auth proxy's httpx transport.
+
+    Home Assistant caches one context per (cipher list, ALPN) pair, and httpx
+    calls ``set_alpn_protocols()`` on whatever context it is handed.  Ask for
+    the HTTP/1.1 bucket - the same one ``create_async_httpx_client`` uses for a
+    non-HTTP/2 client - so that call is a no-op instead of mutating the shared
+    no-ALPN context that other integrations rely on.
+    """
+    if SSL_ALPN_HTTP11 is not None:
+        return client_context(alpn_protocols=SSL_ALPN_HTTP11)
+    return client_context()
+
 
 AUTH_PROXY_PATH = "/auth/microsoft_family_safety/proxy"
 AUTH_CALLBACK_PATH = "/auth/microsoft_family_safety/callback"
@@ -253,9 +276,21 @@ class MicrosoftFamilyAuthProxy:
         # the event loop while keeping a separate cookie jar for this auth flow.
         # auto_cleanup=False because this short-lived proxy closes the client
         # explicitly when the flow finishes/expires.
+        # Fork-only: force IPv4. On hosts whose only IPv6 address is an
+        # unroutable ULA (fd00::/8) the default dual-stack client can raise
+        # httpx.ConnectError("All connection attempts failed") and abort the
+        # flow ("Invalid flow specified"). Binding the local socket to an IPv4
+        # address makes the connector try A records only. verify is set on the
+        # transport because httpx ignores the client-level SSL context once a
+        # transport is supplied; _auth_ssl_context() is HA's cached context.
         self._client = create_async_httpx_client(
             hass,
             auto_cleanup=False,
+            transport=httpx.AsyncHTTPTransport(
+                local_address="0.0.0.0",
+                verify=_auth_ssl_context(),
+                retries=1,
+            ),
             follow_redirects=False,
             timeout=httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0),
             headers={
