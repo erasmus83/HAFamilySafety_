@@ -221,6 +221,11 @@ class FamilySafetyPlatformLockSwitch(CoordinatorEntity, SwitchEntity):
         account = self.coordinator.data.get("accounts", {}).get(self._account_id)
         if not account:
             return None
+        # The Xbox lock state comes from Microsoft's Xbox policy, not from the
+        # mobile aggregator. Until that has been read (or a lock/unlock from
+        # here succeeded), say "unknown" rather than "unlocked".
+        if self._platform == "Xbox" and not account.get("xbox_lock_known", False):
+            return None
         blocked_platforms = account.get("blocked_platforms", [])
         return self._platform in blocked_platforms
 

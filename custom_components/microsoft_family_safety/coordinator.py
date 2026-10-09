@@ -175,6 +175,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auth_notification_sent = False
         self._roster_notification_sent = False
         self._platform_override_until: dict[tuple[str, str], datetime] = {}
+        #: Children whose Xbox lock state is known: Microsoft's Xbox policy
+        #: was read, or a web lock/unlock from here succeeded. Until then the
+        #: Xbox lock switch reports unknown rather than "unlocked".
+        self._xbox_lock_known: set[str] = set()
 
     def _entry_auth_anchor(self) -> str:
         """Fingerprint the base browser/mobile login stored in the config entry.
@@ -520,28 +524,56 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         That policy carries the override the console actually enforces, so the
         lock survives a Home Assistant restart and reflects a block or release
-        made in the Family Safety app. A failed read changes nothing: "unknown"
-        never degrades to "not blocked".
+        made in the Family Safety app.
+
+        Only an answer that can be read settles the state: a "cancel", a
+        blockUntil with a readable expiry, or a recognisable policy carrying no
+        override at all. A failed read, an unknown override type, or a
+        blockUntil whose validUntil is missing or unreadable changes nothing --
+        "unknown" never degrades to "not blocked".
         """
-        if not isinstance(policy, dict):
-            return
-        data = policy.get("data") if isinstance(policy.get("data"), dict) else policy
-        override = data.get("screenTimeOverride")
-        if not isinstance(override, dict):
-            return
-        block_until = FamilySafetyWebAPI.parse_block_until(
-            {"screenTimeOverrides": [override]}
-        )
         key = (str(account_id), "xbox")
-        if block_until is not None and block_until > dt_util.utcnow():
-            self._platform_override_until[key] = block_until
-        else:
-            # Microsoft answered and is not blocking: a stale local entry goes.
-            self._platform_override_until.pop(key, None)
+        if isinstance(policy, dict):
+            data = policy.get("data") if isinstance(policy.get("data"), dict) else policy
+            override = data.get("screenTimeOverride")
+            override_type = (
+                str(override.get("screenTimeOverrideType") or "").lower()
+                if isinstance(override, dict)
+                else None
+            )
+            if override_type == "blockuntil":
+                block_until = FamilySafetyWebAPI.parse_block_until(
+                    {"screenTimeOverrides": [override]}
+                )
+                if block_until is None:
+                    _LOGGER.debug(
+                        "Xbox policy for %s has a blockUntil override without a "
+                        "readable validUntil; keeping the current lock state",
+                        account_id,
+                    )
+                else:
+                    if block_until > dt_util.utcnow():
+                        self._platform_override_until[key] = block_until
+                    else:
+                        self._platform_override_until.pop(key, None)
+                    self._xbox_lock_known.add(key[0])
+            elif override_type == "cancel" or (
+                override is None and "dailyRestrictions" in data
+            ):
+                # Microsoft answered and is not blocking: a stale local entry goes.
+                self._platform_override_until.pop(key, None)
+                self._xbox_lock_known.add(key[0])
+            elif override_type is not None:
+                _LOGGER.debug(
+                    "Xbox policy for %s has an unrecognised override type %r; "
+                    "keeping the current lock state",
+                    account_id, override_type,
+                )
         blocked = [p for p in (account_data.get("blocked_platforms") or []) if p != "Xbox"]
         if key in self._platform_override_until:
             blocked.append("Xbox")
         account_data["blocked_platforms"] = blocked
+        account_data["xbox_lock_known"] = key[0] in self._xbox_lock_known
 
     async def async_lock_platform(
         self, account_id: str, platform: str, valid_until: datetime | None = None
@@ -574,23 +606,28 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     account_id, platform, "blockUntil", date_time
                 )
             except Exception as err:
+                if platform.lower() in self._WEB_LOCK_STATE_PLATFORMS:
+                    raise HomeAssistantError(
+                        f"Could not lock {platform}: the Family web request failed ({err})"
+                    ) from err
                 _LOGGER.debug(
                     "%s web override unavailable; falling back to mobile API: %s",
                     platform, err,
                 )
             else:
                 self._platform_override_until[(str(account_id), platform.lower())] = until_utc
+                if platform.lower() in self._WEB_LOCK_STATE_PLATFORMS:
+                    self._xbox_lock_known.add(str(account_id))
                 await self.async_request_refresh()
                 return
 
-        # Reached only when the web session is unavailable. For Xbox this is
-        # known not to reach the console; it is kept so the call degrades the
-        # way it always has rather than raising.
-        if platform.lower() == "xbox":
-            _LOGGER.warning(
-                "Falling back to the mobile API for an Xbox lock. Microsoft no "
-                "longer enforces Xbox overrides set that way, so the console "
-                "will NOT be blocked. Re-authenticate the Family web session."
+        # The mobile API still accepts an Xbox override but the console ignores
+        # it, so reporting success here would tell automations the console is
+        # locked when it is not.
+        if platform.lower() in self._WEB_LOCK_STATE_PLATFORMS:
+            raise HomeAssistantError(
+                f"Cannot lock {platform}: it can only be locked through the Family "
+                "web session, which is not available. Re-authenticate the integration."
             )
         target = OverrideTarget.from_pretty(platform)
         await account.override_device(target, OverrideType.UNTIL, until)
@@ -618,15 +655,28 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     account_id, platform, "cancel", date_time
                 )
             except Exception as err:
+                if platform.lower() in self._WEB_LOCK_STATE_PLATFORMS:
+                    raise HomeAssistantError(
+                        f"Could not unlock {platform}: the Family web request failed ({err})"
+                    ) from err
                 _LOGGER.debug(
                     "%s web cancel unavailable; falling back to mobile API: %s",
                     platform, err,
                 )
             else:
                 self._platform_override_until.pop((str(account_id), platform.lower()), None)
+                if platform.lower() in self._WEB_LOCK_STATE_PLATFORMS:
+                    self._xbox_lock_known.add(str(account_id))
                 await self.async_request_refresh()
                 return
 
+        # As for the lock: a mobile-API Xbox cancel does nothing on the console,
+        # so fail and keep the lock state as it is rather than report "unlocked".
+        if platform.lower() in self._WEB_LOCK_STATE_PLATFORMS:
+            raise HomeAssistantError(
+                f"Cannot unlock {platform}: it can only be unlocked through the Family "
+                "web session, which is not available. Re-authenticate the integration."
+            )
         await account.override_device(
             OverrideTarget.from_pretty(platform), OverrideType.CANCEL
         )
