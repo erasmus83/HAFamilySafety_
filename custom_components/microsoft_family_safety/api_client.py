@@ -1616,10 +1616,19 @@ class FamilySafetyWebAPI:
                 if key == "windows"
                 else self._platform_settings_referer(key, child_id)
             ),
+            # The Xbox routes answer 403 for a child without an Xbox; that must
+            # not be read as a Family authentication failure. Windows keeps its
+            # existing behaviour.
+            isolated=key != "windows",
         )
         if result is None:
+            detail = (
+                f" ({self.last_isolated_error_code})"
+                if key != "windows" and self.last_isolated_error_code
+                else ""
+            )
             raise FamilySafetyWebAPIError(
-                f"{platform} screen-time override web request failed"
+                f"{platform} screen-time override web request failed{detail}"
             )
         return True
 
@@ -1689,6 +1698,9 @@ class FamilySafetyWebAPI:
             f"{self.WEB_API_BASE}/family/api/xbox/screen-time-xbox",
             params={"childId": str(child_id)},
             referer_override=self._platform_settings_referer("xbox", child_id),
+            # Read every poll for every child: a 403 for a child without an
+            # Xbox must not count as a Family authentication failure.
+            isolated=True,
         )
         return result if isinstance(result, dict) else None
 
