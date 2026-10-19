@@ -202,6 +202,12 @@ Microsoft sessions expire. The account page session lapses about once a day; sin
 
 Reauthentication must use the **same Microsoft account** — signing in with a different one aborts with *"A different Microsoft account was used"*.
 
+#### Daily sign-in on some accounts, and a community workaround
+
+Since early October 2026, Microsoft asks some accounts for an interactive Family sign-in every 24 hours, whatever the cookies say (see [#52](https://github.com/noiwid/HAFamilySafety/issues/52)). The connection sensor then reports `signin_required`, the reauthentication flow starts, and nothing server-side can avoid the sign-in itself.
+
+If you are hit by this and want it unattended, [BartVPL/HAFamilySafety-Auto-Reauth](https://github.com/BartVPL/HAFamilySafety-Auto-Reauth) is a community project that watches the connection sensor, drives the sign-in through Playwright on a separate Linux host, reads the one-time code Microsoft emails through the Gmail API, and completes the flow. It only uses what the integration already exposes (the connection sensor, the `request_reauth` service and the reauth flow). Read its README before installing: it is **not part of this integration, not reviewed here and experimental**. It needs a long-lived Home Assistant token, read-only OAuth access to the mailbox that receives the Microsoft codes, and runs a browser on a machine you must keep secure. Weigh that against signing in by hand once a day.
+
 ### Legacy add-on installation
 
 Only needed if you deliberately want [legacy mode](#legacy-add-on-mode).
