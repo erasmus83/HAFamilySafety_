@@ -518,7 +518,12 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return blocked
 
     def _apply_xbox_lock_state(
-        self, account_id: str, account_data: dict[str, Any], policy: dict | None
+        self,
+        account_id: str,
+        account_data: dict[str, Any],
+        policy: dict | None,
+        *,
+        no_xbox: bool = False,
     ) -> None:
         """Take the Xbox lock state from the Xbox policy Microsoft returns.
 
@@ -531,6 +536,12 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         override at all. A failed read, an unknown override type, or a
         blockUntil whose validUntil is missing or unreadable changes nothing --
         "unknown" never degrades to "not blocked".
+
+        One exception: no_xbox (Microsoft answered 403/404, i.e. no Xbox data
+        for this child) settles a child whose lock state has never been read as
+        not blocked, so an account without an Xbox shows the lock switch as off
+        rather than unknown. A child whose state is already known keeps it: a
+        one-off 403 must not turn a real lock into "off".
         """
         key = (str(account_id), "xbox")
         if isinstance(policy, dict):
@@ -569,6 +580,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "keeping the current lock state",
                     account_id, override_type,
                 )
+        elif no_xbox and key[0] not in self._xbox_lock_known:
+            self._platform_override_until.pop(key, None)
+            self._xbox_lock_known.add(key[0])
         blocked = [p for p in (account_data.get("blocked_platforms") or []) if p != "Xbox"]
         if key in self._platform_override_until:
             blocked.append("Xbox")
@@ -1258,7 +1272,6 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         result: dict[str, Any] = {
             "web_browsing": None,
             "screentime_policy": None,
-            "xbox_policy": None,
         }
         if not self.web_api:
             return result
@@ -1275,12 +1288,6 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             result["content_settings"] = await self.web_api.get_content_settings(account_id)
         except Exception as err:
             _LOGGER.debug("Could not fetch content settings: %r", err)
-        try:
-            result["xbox_policy"] = await self.web_api.get_xbox_screentime_policy(
-                account_id
-            )
-        except Exception as err:
-            _LOGGER.debug("Could not fetch Xbox screen-time policy: %r", err)
         try:
             screentime = await self._fetch_screentime_policy(account_id)
             expired = (
@@ -1487,27 +1494,51 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     if web_data.get(key) is None and previous.get(key) is not None:
                         web_data[key] = previous.get(key)
                 accounts_data[account_id].update(web_data)
-                self._apply_xbox_lock_state(
-                    account_id, accounts_data[account_id], web_data.get("xbox_policy")
-                )
-                self._apply_xbox_limits(accounts_data[account_id], web_data.get("xbox_policy"))
-                # Xbox usage: since about 2026-08-20 the mobile aggregator
-                # reports 0 (or a stale figure) for Xbox play on some accounts,
-                # so read the Xbox activity report from the web API as well.
-                # Only while the Family session is healthy and not backing off,
-                # so a throttled session never gets another request piled onto
-                # it. Not gated on the /st (Windows schedule) read: a child with
-                # no Windows schedule still has Xbox usage. The per-child
-                # interval and backoff live in get_xbox_screentime_usage().
-                today_iso = dt_util.now().date().isoformat()
-                xbox_usage: int | None = None
-                if (
+                # Both Xbox reads (policy and usage report) only run while the
+                # Family session is healthy and not backing off, so a throttled
+                # session never gets another request piled onto it. Not gated
+                # on the /st (Windows schedule) read: a child with no Windows
+                # schedule still has an Xbox. Per-child intervals and the shared
+                # "no Xbox" backoff live in the api_client methods.
+                xbox_gate = bool(
                     self.web_api is not None
                     and self.web_api.has_web_cookies
                     and self.web_api.family_context_state == "ready"
                     and float(getattr(self.web_api, "_family_web_backoff_until", 0.0) or 0.0)
                     <= time.monotonic()
-                ):
+                )
+                xbox_policy: dict | None = None
+                if xbox_gate:
+                    try:
+                        xbox_policy = await self.web_api.get_xbox_screentime_policy(
+                            account_id
+                        )
+                    except Exception as err:
+                        _LOGGER.debug("Could not fetch Xbox screen-time policy: %r", err)
+                # The lock state comes from a fresh read only. The full payload
+                # is kept on the account data (last good one on a miss) for
+                # anything else that needs the Xbox schedule.
+                self._apply_xbox_lock_state(
+                    account_id,
+                    accounts_data[account_id],
+                    xbox_policy,
+                    no_xbox=bool(
+                        self.web_api is not None
+                        and self.web_api.has_no_xbox_data(account_id)
+                    ),
+                )
+                accounts_data[account_id]["xbox_policy"] = (
+                    xbox_policy if xbox_policy is not None else previous.get("xbox_policy")
+                )
+                # Fork-only: today's Xbox allowance and the per-day schedule, from
+                # the same fresh read (a miss leaves the entity unavailable).
+                self._apply_xbox_limits(accounts_data[account_id], xbox_policy)
+                # Xbox usage: since about 2026-08-20 the mobile aggregator
+                # reports 0 (or a stale figure) for Xbox play on some accounts,
+                # so read the Xbox activity report from the web API as well.
+                today_iso = dt_util.now().date().isoformat()
+                xbox_usage: int | None = None
+                if xbox_gate:
                     try:
                         xbox_usage = await self.web_api.get_xbox_screentime_usage(
                             account_id,

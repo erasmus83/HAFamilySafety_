@@ -200,6 +200,9 @@ class FamilySafetyWebAPI:
         self._xbox_report_next_fetch: dict[str, float] = {}
         #: child id -> consecutive 403/404 answers from the Xbox report.
         self._xbox_report_no_data: dict[str, int] = {}
+        #: child id -> time.monotonic() before which the Xbox policy is not read
+        #: again (after a timeout/network error, or a "no Xbox" verdict).
+        self._xbox_policy_next_fetch: dict[str, float] = {}
         #: Outcome of the last _web_request(isolated=True) call.
         self.last_isolated_error_code: str | None = None
         self.family_context_last_checked: int | None = None
@@ -1689,20 +1692,65 @@ class FamilySafetyWebAPI:
 
         Used for the lock state: it is what the console enforces, and it
         survives a Home Assistant restart and reflects a block or release made
-        in the Family Safety app.
+        in the Family Safety app. Returns the full payload (with the "data"
+        wrapper); the coordinator keeps it on the account data as
+        "xbox_policy" for anything else that needs the Xbox schedule.
+
+        Returns None when the read is skipped or fails. A 403/404 (a child
+        without an Xbox) backs both Xbox reads off via _note_no_xbox_data; a
+        timeout or network error backs this read off for
+        _XBOX_REPORT_BACKOFF_SECONDS.
         """
         if not self._web_cookies:
+            return None
+        key = str(child_id)
+        now = time.monotonic()
+        if now < self._xbox_policy_next_fetch.get(key, 0.0):
             return None
         result = await self._web_request(
             "GET",
             f"{self.WEB_API_BASE}/family/api/xbox/screen-time-xbox",
-            params={"childId": str(child_id)},
+            params={"childId": key},
             referer_override=self._platform_settings_referer("xbox", child_id),
             # Read every poll for every child: a 403 for a child without an
             # Xbox must not count as a Family authentication failure.
             isolated=True,
         )
-        return result if isinstance(result, dict) else None
+        if not isinstance(result, dict):
+            code = self.last_isolated_error_code
+            if code in ("HTTP_403", "HTTP_404"):
+                self._note_no_xbox_data(key, code, "Xbox policy")
+            elif code in ("TIMEOUT", "NETWORK_ERROR"):
+                self._xbox_policy_next_fetch[key] = now + _XBOX_REPORT_BACKOFF_SECONDS
+            return None
+        # An answer means this child has an Xbox: clear any "no Xbox" verdict.
+        self._xbox_report_no_data.pop(key, None)
+        return result
+
+    def has_no_xbox_data(self, child_id: str) -> bool:
+        """True while this child is backed off because Microsoft has no Xbox
+        data for it (403/404 from the Xbox report or the Xbox policy)."""
+        return bool(self._xbox_report_no_data.get(str(child_id)))
+
+    def _note_no_xbox_data(self, key: str, code: str, source: str) -> None:
+        """Back both Xbox reads off for a child Microsoft has no Xbox data for.
+
+        Shared by the Xbox report and the Xbox policy: a 403/404 from either
+        means the child has no Xbox, so neither is worth asking again soon.
+        1 h, then 6 h, then 24 h; a successful answer from either resets it.
+        """
+        misses = self._xbox_report_no_data.get(key, 0)
+        self._xbox_report_no_data[key] = misses + 1
+        delays = _XBOX_REPORT_NO_DATA_BACKOFF_SECONDS
+        seconds = delays[min(misses, len(delays) - 1)]
+        until = time.monotonic() + seconds
+        self._xbox_report_next_fetch[key] = until
+        self._xbox_policy_next_fetch[key] = until
+        _LOGGER.info(
+            "%s answered %s for child %s (no Xbox data for this child); not "
+            "asking for Xbox data again for %d h",
+            source, code[5:], key, seconds // 3600,
+        )
 
     @staticmethod
     def parse_xbox_daily_restrictions(payload: object) -> dict[str, dict[str, Any]]:
@@ -1925,14 +1973,7 @@ class FamilySafetyWebAPI:
         if result is None:
             code = self.last_isolated_error_code
             if code in ("HTTP_403", "HTTP_404"):
-                misses = self._xbox_report_no_data.get(key, 0)
-                self._xbox_report_no_data[key] = misses + 1
-                delays = _XBOX_REPORT_NO_DATA_BACKOFF_SECONDS
-                self._back_off_xbox_report(
-                    key,
-                    f"answered {code[5:]} (no Xbox data for this child)",
-                    delays[min(misses, len(delays) - 1)],
-                )
+                self._note_no_xbox_data(key, code, "Xbox activity report")
             elif code in ("TIMEOUT", "NETWORK_ERROR"):
                 self._back_off_xbox_report(
                     key, code.lower().replace("_", " "), _XBOX_REPORT_BACKOFF_SECONDS
