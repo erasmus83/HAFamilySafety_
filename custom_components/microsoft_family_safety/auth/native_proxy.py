@@ -27,6 +27,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.httpx_client import create_async_httpx_client
 
+from ..api_client import _BOT_MANAGER_COOKIE_NAMES
 from ..const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -54,6 +55,16 @@ _AUTH_COOKIE_NAMES = {
     "RPSAuth",
     "RPSSecAuth",
 }
+
+#: ``MAX_LINE_SIZE`` in homeassistant/components/http/server.py, passed to
+#: aiohttp as ``max_field_size``: a single request header above it answers
+#: 400 before any view runs. The browser's Cookie header for the proxy path
+#: has to stay well below it (#60).
+_BROWSER_COOKIE_HEADER_LIMIT = 24570
+#: Largest cookie value worth mirroring to the browser. Microsoft's page
+#: scripts read small markers (market, correlation vectors, telemetry ids);
+#: the multi-kilobyte tokens are HttpOnly anyway and only matter upstream.
+_BROWSER_COOKIE_VALUE_LIMIT = 2048
 
 _HOP_BY_HOP_HEADERS = {
     "connection",
@@ -341,8 +352,6 @@ class MicrosoftFamilyAuthProxy:
         browser fingerprint and make Microsoft hang up on any other client that
         replays them (see ``api_client.strip_bot_manager_cookies``).
         """
-        from ..api_client import _BOT_MANAGER_COOKIE_NAMES
-
         cookies: list[dict[str, Any]] = []
         for cookie in self._client.cookies.jar:
             if cookie.name in _BOT_MANAGER_COOKIE_NAMES:
@@ -940,11 +949,22 @@ class MicrosoftFamilyAuthProxy:
         every hop so Microsoft's browser JavaScript sees a consistent cookie
         view on the scoped HA proxy origin while the upstream jar remains
         authoritative.
+
+        Only cookies that page JavaScript can read are mirrored. The browser's
+        Cookie header is never forwarded upstream (``_HOP_BY_HOP_HEADERS``), so
+        an HttpOnly cookie on the proxy origin serves nobody: it only grows the
+        Cookie header the browser sends back on every proxied request, and
+        Home Assistant's HTTP server rejects any header field above
+        ``_BROWSER_COOKIE_HEADER_LIMIT`` bytes before the view runs (#60). The
+        same goes for Akamai Bot Manager cookies and for oversized values.
+        Those are removed from the browser instead when it still holds them.
         """
         result: list[str] = []
         secure_proxy = request.scheme == "https"
         final_host = (URL(str(response.url)).host or "").lower()
         seen: set[str] = set()
+        browser_cookies = self._browser_cookie_names(request)
+        excluded: dict[str, str] = {}
 
         def append_cookie(
             name: str,
@@ -962,11 +982,23 @@ class MicrosoftFamilyAuthProxy:
             if key in seen:
                 return
             seen.add(key)
+            if http_only:
+                excluded[key] = name
+                return
+            if name in _BOT_MANAGER_COOKIE_NAMES:
+                excluded[key] = name
+                return
+            if len(value) > _BROWSER_COOKIE_VALUE_LIMIT:
+                _LOGGER.debug(
+                    "Not mirroring Microsoft cookie %s to the proxy origin: %d bytes",
+                    name,
+                    len(value),
+                )
+                excluded[key] = name
+                return
             parts = [f"{name}={value}", f"Path={self.proxy_path}/"]
             if max_age:
                 parts.append(f"Max-Age={max_age}")
-            if http_only:
-                parts.append("HttpOnly")
             if secure_proxy and secure:
                 parts.append("Secure")
             same_site = (same_site or "").strip()
@@ -1014,7 +1046,45 @@ class MicrosoftFamilyAuthProxy:
                 secure=bool(cookie.secure),
                 same_site=cookie.get_nonstandard_attr("SameSite") or "",
             )
+
+        # Purge from the browser what should not live on the proxy origin:
+        # cookies excluded above that an earlier hop (or an earlier version)
+        # mirrored, Akamai cookies that Microsoft's page scripts write
+        # client-side, and oversized values. A deletion is only sent for a
+        # cookie the browser actually presented, so the response stays small.
+        for key, (name, value_length) in browser_cookies.items():
+            if key in seen and key not in excluded:
+                continue
+            if (
+                key in excluded
+                or name in _BOT_MANAGER_COOKIE_NAMES
+                or value_length > _BROWSER_COOKIE_VALUE_LIMIT
+            ):
+                result.append(f"{name}=; Path={self.proxy_path}/; Max-Age=0")
         return result
+
+    @staticmethod
+    def _browser_cookie_names(request: web.Request) -> dict[str, tuple[str, int]]:
+        """Return the cookies the browser sent on the proxy origin, by lower-cased name."""
+        header = request.headers.get("Cookie") or ""
+        found: dict[str, tuple[str, int]] = {}
+        for chunk in header.split(";"):
+            name, sep, value = chunk.strip().partition("=")
+            name = name.strip()
+            if not name or not sep:
+                continue
+            key = name.lower()
+            if key not in found:
+                found[key] = (name, len(value))
+        if len(header) > _BROWSER_COOKIE_HEADER_LIMIT // 2:
+            _LOGGER.warning(
+                "Browser sends %d bytes of cookies on the Microsoft auth proxy path "
+                "(%d names); Home Assistant rejects requests above %d bytes",
+                len(header),
+                len(found),
+                _BROWSER_COOKIE_HEADER_LIMIT,
+            )
+        return found
 
     def _response_headers(self, response: httpx.Response) -> Mapping[str, str]:
         result: dict[str, str] = {}
@@ -1053,10 +1123,24 @@ class MicrosoftFamilyAuthProxy:
                 content=body if body else None,
             )
         except httpx.TimeoutException as err:
-            _LOGGER.warning("Microsoft authentication request timed out: %s", err)
+            _LOGGER.warning(
+                "Microsoft authentication request timed out: %s https://%s%s: %s",
+                request.method,
+                target.host,
+                target.path,
+                err,
+            )
             raise web.HTTPGatewayTimeout(text="Microsoft authentication request timed out") from err
         except httpx.HTTPError as err:
-            _LOGGER.warning("Microsoft authentication request failed: %s", err)
+            # The host matters: a DNS filter or a missing IPv6 route shows up
+            # here as a failure on one Microsoft telemetry or probe host only.
+            _LOGGER.warning(
+                "Microsoft authentication request failed: %s https://%s%s: %s",
+                request.method,
+                target.host,
+                target.path,
+                err,
+            )
             raise web.HTTPBadGateway(text="Microsoft authentication request failed") from err
 
         current = URL(str(response.url))
