@@ -1453,7 +1453,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     if web_data.get(key) is None and previous.get(key) is not None:
                         web_data[key] = previous.get(key)
                 accounts_data[account_id].update(web_data)
-                # Both Xbox reads (policy and usage report) only run while the
+                # Both Xbox reads (usage report, then policy) only run while the
                 # Family session is healthy and not backing off, so a throttled
                 # session never gets another request piled onto it. Not gated
                 # on the /st (Windows schedule) read: a child with no Windows
@@ -1465,29 +1465,6 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     and self.web_api.family_context_state == "ready"
                     and float(getattr(self.web_api, "_family_web_backoff_until", 0.0) or 0.0)
                     <= time.monotonic()
-                )
-                xbox_policy: dict | None = None
-                if xbox_gate:
-                    try:
-                        xbox_policy = await self.web_api.get_xbox_screentime_policy(
-                            account_id
-                        )
-                    except Exception as err:
-                        _LOGGER.debug("Could not fetch Xbox screen-time policy: %r", err)
-                # The lock state comes from a fresh read only. The full payload
-                # is kept on the account data (last good one on a miss) for
-                # anything else that needs the Xbox schedule.
-                self._apply_xbox_lock_state(
-                    account_id,
-                    accounts_data[account_id],
-                    xbox_policy,
-                    no_xbox=bool(
-                        self.web_api is not None
-                        and self.web_api.has_no_xbox_data(account_id)
-                    ),
-                )
-                accounts_data[account_id]["xbox_policy"] = (
-                    xbox_policy if xbox_policy is not None else previous.get("xbox_policy")
                 )
                 # Xbox usage: since about 2026-08-20 the mobile aggregator
                 # reports 0 (or a stale figure) for Xbox play on some accounts,
@@ -1523,6 +1500,33 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 mobile_usage = accounts_data[account_id].get("today_screentime_usage")
                 if xbox_usage is not None and xbox_usage > (mobile_usage or 0):
                     accounts_data[account_id]["today_screentime_usage"] = xbox_usage
+                # The policy is read after the usage report: for a child without
+                # an Xbox the report answers 403 and sets the shared "no Xbox"
+                # backoff, which then skips this read in the same poll (the
+                # policy itself answers 200 for such a child).
+                xbox_policy: dict | None = None
+                if xbox_gate:
+                    try:
+                        xbox_policy = await self.web_api.get_xbox_screentime_policy(
+                            account_id
+                        )
+                    except Exception as err:
+                        _LOGGER.debug("Could not fetch Xbox screen-time policy: %r", err)
+                # The lock state comes from a fresh read only. The full payload
+                # is kept on the account data (last good one on a miss) for
+                # anything else that needs the Xbox schedule.
+                self._apply_xbox_lock_state(
+                    account_id,
+                    accounts_data[account_id],
+                    xbox_policy,
+                    no_xbox=bool(
+                        self.web_api is not None
+                        and self.web_api.has_no_xbox_data(account_id)
+                    ),
+                )
+                accounts_data[account_id]["xbox_policy"] = (
+                    xbox_policy if xbox_policy is not None else previous.get("xbox_policy")
+                )
             await self._async_track_family_context()
             await self._async_sync_roster_notification(accounts_data)
             self._accounts = new_accounts

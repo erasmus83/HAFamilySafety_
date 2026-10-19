@@ -1696,10 +1696,11 @@ class FamilySafetyWebAPI:
         wrapper); the coordinator keeps it on the account data as
         "xbox_policy" for anything else that needs the Xbox schedule.
 
-        Returns None when the read is skipped or fails. A 403/404 (a child
-        without an Xbox) backs both Xbox reads off via _note_no_xbox_data; a
-        timeout or network error backs this read off for
-        _XBOX_REPORT_BACKOFF_SECONDS.
+        Returns None when the read is skipped or fails. It is skipped while the
+        child has a "no Xbox" verdict (see _note_no_xbox_data). This endpoint
+        answers 200 even for a child without an Xbox, so a success here never
+        clears that verdict; a 403/404 still feeds it. A timeout or network
+        error backs this read off for _XBOX_REPORT_BACKOFF_SECONDS.
         """
         if not self._web_cookies:
             return None
@@ -1723,8 +1724,9 @@ class FamilySafetyWebAPI:
             elif code in ("TIMEOUT", "NETWORK_ERROR"):
                 self._xbox_policy_next_fetch[key] = now + _XBOX_REPORT_BACKOFF_SECONDS
             return None
-        # An answer means this child has an Xbox: clear any "no Xbox" verdict.
-        self._xbox_report_no_data.pop(key, None)
+        # A 200 here does NOT clear the "no Xbox" verdict: this endpoint
+        # answers 200 even for a child without an Xbox (observed in review of
+        # #56). Only a successful Xbox activity report clears it.
         return result
 
     def has_no_xbox_data(self, child_id: str) -> bool:
@@ -1735,9 +1737,11 @@ class FamilySafetyWebAPI:
     def _note_no_xbox_data(self, key: str, code: str, source: str) -> None:
         """Back both Xbox reads off for a child Microsoft has no Xbox data for.
 
-        Shared by the Xbox report and the Xbox policy: a 403/404 from either
-        means the child has no Xbox, so neither is worth asking again soon.
-        1 h, then 6 h, then 24 h; a successful answer from either resets it.
+        Fed by a 403/404 from the Xbox report (and from the Xbox policy, should
+        it ever answer one): the child has no Xbox, so neither read is worth
+        asking again soon. 1 h, then 6 h, then 24 h. Only a successful Xbox
+        activity report resets it -- the policy answers 200 for a child
+        without an Xbox too, so its success says nothing.
         """
         misses = self._xbox_report_no_data.get(key, 0)
         self._xbox_report_no_data[key] = misses + 1
