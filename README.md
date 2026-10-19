@@ -638,6 +638,9 @@ proxy_busy_buffers_size 256k;
 ```
 
 Nginx Proxy Manager: add the same three lines under the host's **Advanced** tab. Then restart the sign-in.
+
+Official "NGINX Home Assistant SSL proxy" add-on: in the add-on configuration, enable **Customize** > `active`, keep the default file names (`nginx_proxy_default*.conf`), put the same three lines in `/share/nginx_proxy_default_proxy_buffer.conf` and restart the add-on.
+
 ### "Automatic browser authentication normally requires HTTPS"
 
 Your Home Assistant URL is not HTTPS. Either configure HTTPS (recommended), or enable **Allow insecure local HTTP authentication (testing only)** — which only works for local hostnames and private IP addresses. See [Insecure local HTTP authentication](#insecure-local-http-authentication).
