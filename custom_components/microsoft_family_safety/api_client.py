@@ -1752,6 +1752,14 @@ class FamilySafetyWebAPI:
             source, code[5:], key, seconds // 3600,
         )
 
+    async def get_content_settings(self, child_id: str) -> dict | None:
+        result = await self._request("GET", f"/v1/ContentRestrictions/{child_id}")
+        return result if isinstance(result, dict) else None
+
+    async def get_devices(self, child_id: str) -> dict | None:
+        result = await self._request("GET", f"/v1/devices/{child_id}")
+        return result if isinstance(result, dict) else None
+
     async def get_xbox_screentime_usage(
         self, child_id: str, time_zone: str, target_date: str
     ) -> int | None:
