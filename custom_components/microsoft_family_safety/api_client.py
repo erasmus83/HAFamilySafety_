@@ -859,7 +859,7 @@ class FamilySafetyWebAPI:
                             "Microsoft Family bootstrap login page markers: query_keys=%s "
                             "prompt=%s title=%r length=%d form=%s code_field=%s "
                             "error_field=%s interaction_required=%s login_required=%s "
-                            "kmsi=%s",
+                            "kmsi=%s microsoftonline_cookies=%s",
                             sorted(final_url.query.keys()),
                             final_url.query.get("prompt"),
                             title,
@@ -870,6 +870,15 @@ class FamilySafetyWebAPI:
                             "interaction_required" in lowered,
                             "login_required" in lowered,
                             "kmsi" in lowered,
+                            # Fork experiment (#52): which login.microsoftonline.com
+                            # cookies the session held when it was sent here.
+                            sorted(
+                                {
+                                    m.key
+                                    for m in session.cookie_jar
+                                    if "microsoftonline" in str(m["domain"] or "")
+                                }
+                            ),
                         )
                         return None
 

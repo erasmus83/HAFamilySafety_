@@ -1037,6 +1037,12 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self.flow_id,
             len(cookies),
         )
+        # Fork experiment (#52): names only, never values.
+        _LOGGER.info(
+            "Native sign-in kept %d login.microsoftonline.com cookie(s): %s",
+            len(proxy.microsoftonline_cookie_names()),
+            ", ".join(proxy.microsoftonline_cookie_names()) or "none",
+        )
         try:
             from .auth.native_proxy import unregister_native_proxy
 
