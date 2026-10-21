@@ -569,13 +569,46 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if self.api is None:
             return False
-        return await self.api.approve_pending_request(request_id, extension_time * 10)
+        try:
+            return await self.api.approve_pending_request(
+                request_id, extension_time * 10
+            )
+        except ValueError as err:
+            await self._async_request_gone("approve", request_id, err)
+        return False
 
     async def async_deny_request(self, request_id: str) -> bool:
         """Deny a pending screen time request."""
         if self.api is None:
             return False
-        return await self.api.deny_pending_request(request_id)
+        try:
+            return await self.api.deny_pending_request(request_id)
+        except ValueError as err:
+            await self._async_request_gone("deny", request_id, err)
+        return False
+
+    async def _async_request_gone(
+        self, action: str, request_id: str, err: ValueError
+    ) -> None:
+        """Turn pyfamilysafety's ``ValueError`` into a clear user-facing error.
+
+        The library looks the id up in the list it fetched on the last poll and
+        raises ``ValueError("Pending request not found")`` when it is gone. That
+        happens when the request was already approved or denied elsewhere
+        (typically from the Family Safety app) or expired, while the dashboard
+        still showed it. Nothing was sent to Microsoft. Refresh so the stale
+        request disappears from the entities, then explain what happened.
+        """
+        _LOGGER.info(
+            "Cannot %s request %s: it is no longer pending (%s)",
+            action, request_id, err,
+        )
+        await self.async_request_refresh()
+        raise HomeAssistantError(
+            f"Request {request_id} is no longer pending: it was probably already "
+            "approved or denied from the Family Safety app, or it expired. "
+            "The pending requests have been refreshed."
+        ) from err
 
     async def _fetch_screentime_policy(
         self, account_id: str, *, require_child_match: bool = False
