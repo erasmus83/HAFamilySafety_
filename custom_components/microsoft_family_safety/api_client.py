@@ -22,6 +22,7 @@ import aiohttp
 from yarl import URL
 
 from ._pyfamilysafety_compat import authenticator_access_token_expired
+from ._silent_signin_diag import log_bootstrap as _log_bootstrap_diag
 from .const import DAY_KEYS
 
 _LOGGER = logging.getLogger(__name__)
@@ -845,6 +846,8 @@ class FamilySafetyWebAPI:
                             attempt, final_url.host, final_url.path, resp.status, rotated,
                         )
                         self._family_auth_required_warned = True
+                        # Fork #52 diag: redirect chain and the silent page.
+                        _log_bootstrap_diag(_LOGGER, "auth_required", resp, page, session)
                         # Diagnostic markers only (no values): tell an interactive
                         # sign-in page apart from a prompt=none auto-submit form
                         # that a browser would post on its own.
@@ -889,6 +892,9 @@ class FamilySafetyWebAPI:
                     ):
                         csrf = _extract_request_verification_token(page)
                         if csrf:
+                            # Fork #52 diag: the chain of a successful bootstrap,
+                            # for comparison (no page dump on /family paths).
+                            _log_bootstrap_diag(_LOGGER, "ready", resp, None, session)
                             self._web_csrf = csrf
                             self._family_referer = str(final_url)
                             self.family_context_state = "ready"

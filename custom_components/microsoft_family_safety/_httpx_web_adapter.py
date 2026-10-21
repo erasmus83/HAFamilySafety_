@@ -118,6 +118,8 @@ class _ResponseAdapter:
         self.status = response.status_code
         self.url = response.url
         self.headers = response.headers
+        # Fork #52 diagnostics: the followed redirect hops.
+        self.history = list(response.history)
 
     async def text(self) -> str:
         return self._response.text
