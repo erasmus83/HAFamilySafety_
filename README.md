@@ -594,7 +594,7 @@ A clean per-child panel is available as a [decluttering-card](https://github.com
 
 - A header with the day's progress bar and allowed window, plus a clickable connection-health pill (opens the integration to re-authenticate)
 - Screen time used, blocked-app count, pending-request count
-- Approve/deny buttons that appear when a request is pending
+- When a request is pending: what is being asked (platform and time of the request, tooltip with Microsoft's message), with Approve (grants 1 hour) / Deny buttons
 - Lock, Windows-lock and screen-time-limits switches
 - Today's top apps, and the weekly limits grid (tap to edit the limit, hold to edit the window)
 

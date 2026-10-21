@@ -242,6 +242,38 @@ decluttering_templates:
               card:
                 type: custom:mushroom-title-card
                 title: ''
+            - type: custom:button-card
+              entity: sensor.[[child]]_pending_requests
+              show_icon: false
+              show_name: false
+              show_state: false
+              tap_action:
+                action: more-info
+              styles:
+                grid:
+                - grid-template-areas: '"req"'
+                - grid-template-columns: 1fr
+                card:
+                - padding: 10px 12px 0 12px
+                - border: none
+                - background: transparent
+                - border-radius: 0 !important
+                - box-shadow: none
+                custom_fields:
+                  req:
+                  - grid-area: req
+                  - justify-self: stretch
+                  - width: 100%
+                  - text-align: left
+              custom_fields:
+                req: >-
+                  [[[ const reqs = entity.attributes.requests || []; if (!reqs.length) return '';
+                  const r = reqs[0];
+                  const label = r.type === 'DeviceScreenTime' ? 'More time on ' + (r.platform || 'a device') : (r.appName || r.title || r.type || 'Request');
+                  let when = '';
+                  if (r.requestedTime) { let iso = String(r.requestedTime).replace(/(\.\d{3})\d+/, '$1'); if (!/(Z|[+-]\d\d:?\d\d)$/.test(iso)) iso += 'Z'; const d = new Date(iso); if (!isNaN(d)) when = ' · asked at ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+                  const more = reqs.length > 1 ? ' · +' + (reqs.length - 1) + ' more' : '';
+                  return `<div style="display:flex;align-items:center;gap:8px;width:100%"><ha-icon icon="mdi:hand-back-right" style="--mdc-icon-size:18px;width:18px;height:18px;color:#FF9800"></ha-icon><span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.message || ''}">${label}${when}${more}</span></div>`; ]]]
             - type: horizontal-stack
               card_mod:
                 style: '#root { gap: 0 !important; }
@@ -252,7 +284,7 @@ decluttering_templates:
               cards:
               - type: custom:button-card
                 entity: button.[[lock]]_approve_request
-                name: Approve
+                name: Approve (1 h)
                 icon: mdi:check-circle
                 tap_action:
                   action: toggle
