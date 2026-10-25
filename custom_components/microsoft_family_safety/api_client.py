@@ -176,6 +176,9 @@ class FamilySafetyWebAPI:
         #: "terms_of_use" when updated Terms of Use must be accepted. Such a
         #: step is a user decision and is never submitted automatically.
         self.account_interrupt: str | None = None
+        #: Set once the mobile /v4 schedule API answered; schedules then no
+        #: longer depend on the Family web context.
+        self.mobile_schedule_ok = False
         # Keep authentication health separate from endpoint-specific failures.
         # A private endpoint may return 401/403 while the account.microsoft.com
         # Family browser session itself is still authenticated.
@@ -1866,6 +1869,149 @@ class FamilySafetyWebAPI:
         except (ValueError, IndexError):
             return None
         return hours * 60 + minutes + (1 if seconds >= 30 else 0)
+
+    # ------------------------------------------------------------------
+    # Mobile schedule API (/v4/devicelimits/schedules), as used by the
+    # Family Safety iOS app 2.1.0. It runs on the long-lived mobile refresh
+    # token, so it keeps working when the Family web context demands its
+    # daily interactive sign-in (prompt=login, #52). GET needs ``culture``
+    # and ``time`` (local ISO time with offset); both calls need Plat-Info.
+    # Allowances are milliseconds, intervals are {begin, end} "HH:MM:SS".
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _mobile_now() -> str:
+        return datetime.now().astimezone().isoformat(timespec="seconds")
+
+    async def _get_mobile_schedules(self, child_id: str) -> dict:
+        result = await self._request(
+            "GET",
+            f"/v4/devicelimits/schedules/{child_id}",
+            params={"culture": "en-us", "time": self._mobile_now()},
+            extra_headers={"Plat-Info": "Windows"},
+        )
+        if not isinstance(result, dict):
+            raise FamilySafetyWebAPIError("Mobile schedule response was empty")
+        self.mobile_schedule_ok = True
+        return result
+
+    @staticmethod
+    def _mobile_platform_schedule(payload: dict, platform: str) -> dict | None:
+        for schedule in payload.get("schedules") or []:
+            if isinstance(schedule, dict) and str(schedule.get("appliesTo")).lower() == platform.lower():
+                return schedule
+        return None
+
+    @staticmethod
+    def _time_to_slot(value: str, *, ceil: bool) -> int:
+        parts = [int(p) for p in str(value).split(":")[:3]] + [0, 0]
+        minutes = parts[0] * 60 + parts[1] + (1 if parts[2] else 0)
+        slot = minutes // 30 + (1 if ceil and minutes % 30 else 0)
+        return max(0, min(48, slot))
+
+    @classmethod
+    def _intervals_to_slots(cls, intervals: list) -> list[bool]:
+        slots = [False] * 48
+        for item in intervals or []:
+            if not isinstance(item, dict):
+                continue
+            start = cls._time_to_slot(item.get("begin", "00:00:00"), ceil=False)
+            end = cls._time_to_slot(item.get("end", "00:00:00"), ceil=True)
+            if end <= start:
+                end = 48
+            for index in range(start, end):
+                slots[index] = True
+        return slots
+
+    @staticmethod
+    def _slots_to_intervals(slots: list[bool]) -> list[dict[str, str]]:
+        def fmt(slot: int) -> str:
+            if slot >= 48:
+                return "23:59:59"
+            return f"{slot // 2:02d}:{30 if slot % 2 else 0:02d}:00"
+
+        intervals: list[dict[str, str]] = []
+        start: int | None = None
+        for index, allowed in enumerate(list(slots) + [False]):
+            if allowed and start is None:
+                start = index
+            elif not allowed and start is not None:
+                intervals.append({"begin": fmt(start), "end": fmt(index)})
+                start = None
+        return intervals
+
+    async def get_mobile_screentime_policy(self, child_id: str, platform: str = "Windows") -> dict | None:
+        """Return the child's schedule in the shape the entities read (allowance "HH:MM:SS")."""
+        schedule = self._mobile_platform_schedule(await self._get_mobile_schedules(child_id), platform)
+        if schedule is None:
+            return None
+        daily: dict[str, dict[str, Any]] = {}
+        for day, data in (schedule.get("dailyRestrictions") or {}).items():
+            if not isinstance(data, dict):
+                continue
+            seconds = int(data.get("allowance") or 0) // 1000
+            intervals = data.get("allottedIntervals") or []
+            daily[day] = {
+                "allowance": f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}",
+                "allottedIntervals": intervals,
+                "allowedIntervals": self._intervals_to_slots(intervals),
+            }
+        if not daily:
+            return None
+        return {"isEnabled": schedule.get("enabled"), "appliesTo": schedule.get("appliesTo"),
+                "dailyRestrictions": daily}
+
+    async def _patch_mobile_day(
+        self,
+        child_id: str,
+        day_of_week: int,
+        *,
+        allowance_ms: int | None = None,
+        intervals: list[dict[str, str]] | None = None,
+        platform: str = "Windows",
+    ) -> None:
+        payload = await self._get_mobile_schedules(child_id)
+        schedule = self._mobile_platform_schedule(payload, platform)
+        if schedule is None:
+            raise FamilySafetyWebAPIError(f"No {platform} schedule in the mobile response")
+        day = DAY_KEYS[day_of_week]
+        current = (schedule.get("dailyRestrictions") or {}).get(day) or {}
+        body = {
+            "dailyRestrictions": {
+                day: {
+                    "allowance": int(current.get("allowance") or 0) if allowance_ms is None else allowance_ms,
+                    "allottedIntervals": (
+                        (current.get("allottedIntervals") or []) if intervals is None else intervals
+                    ),
+                }
+            },
+            "appliesTo": schedule.get("appliesTo") or platform,
+            "culture": "en-us",
+            "mode": payload.get("mode") or "PerDeviceType",
+            "time": self._mobile_now(),
+        }
+        await self._request(
+            "PATCH", f"/v4/devicelimits/schedules/{child_id}",
+            json_data=body, extra_headers={"Plat-Info": "Windows"},
+        )
+
+    async def set_mobile_screentime_allowance(
+        self, child_id: str, day_of_week: int, hours: int, minutes: int
+    ) -> bool:
+        await self._patch_mobile_day(
+            child_id, day_of_week, allowance_ms=(int(hours) * 60 + int(minutes)) * 60_000
+        )
+        return True
+
+    async def set_mobile_screentime_intervals(
+        self, child_id: str, day_of_week: int, allowed_intervals: list[bool]
+    ) -> bool:
+        if len(allowed_intervals) != 48:
+            raise ValueError("allowed_intervals must contain exactly 48 values")
+        await self._patch_mobile_day(
+            child_id, day_of_week, intervals=self._slots_to_intervals(allowed_intervals)
+        )
+        return True
 
     async def set_screentime_daily_allowance(
         self,

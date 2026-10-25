@@ -780,6 +780,13 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _set_screentime_allowance(
         self, child_id: str, day_of_week: int, hours: int, minutes: int
     ) -> bool:
+        if self.web_api is not None:
+            try:
+                return await self.web_api.set_mobile_screentime_allowance(
+                    child_id, day_of_week, hours, minutes
+                )
+            except Exception as err:  # noqa: BLE001 - fall back to the web path
+                _LOGGER.warning("Mobile screen-time allowance update failed, trying web: %s", err)
         if self._native_web_auth:
             if self.web_api is None:
                 raise RuntimeError("Web API not initialized")
@@ -793,6 +800,13 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _set_screentime_intervals(
         self, child_id: str, day_of_week: int, allowed_intervals: list[bool]
     ) -> bool:
+        if self.web_api is not None:
+            try:
+                return await self.web_api.set_mobile_screentime_intervals(
+                    child_id, day_of_week, allowed_intervals
+                )
+            except Exception as err:  # noqa: BLE001 - fall back to the web path
+                _LOGGER.warning("Mobile screen-time interval update failed, trying web: %s", err)
         if self._native_web_auth:
             if self.web_api is None:
                 raise RuntimeError("Web API not initialized")
@@ -1376,6 +1390,15 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         self._family_auth_required_polls += 1
         if not self._family_context_dead_end:
+            return
+        if getattr(self.web_api, "mobile_schedule_ok", False):
+            # Schedules run on the mobile API; the expired web context only
+            # affects web-only extras, so a daily reauth prompt is not worth it.
+            if self._family_auth_required_polls == _FAMILY_AUTH_REQUIRED_POLLS:
+                _LOGGER.info(
+                    "Family web context needs an interactive sign-in; schedules keep "
+                    "working through the mobile API, so no reauthentication is requested"
+                )
             return
         await self._create_auth_notification()
         self._request_reauth("family_context_auth_required")
