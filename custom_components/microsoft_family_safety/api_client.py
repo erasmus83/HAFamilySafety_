@@ -1946,47 +1946,70 @@ class FamilySafetyWebAPI:
         )
         return result if isinstance(result, dict) else None
 
-    async def block_website(self, child_id: str, website: str) -> dict | None:
-        """Block a website without discarding the existing lists.
+    @staticmethod
+    def _website_url(website: str) -> str:
+        """Microsoft wants an absolute URL in the exception list (#54).
 
-        Microsoft treats the list fields as policy values, so preserve the
-        current blocked/allowed entries instead of sending only the new host.
-        Reading is performed through the current web endpoint when available;
-        the actual write remains on the mobile API, as in the upstream client.
+        A bare host such as ``example.org`` answers
+        ``Settings.WebRestrictions.BadUrlFormat``; ``https://example.org`` is
+        accepted and the app shows it as ``example.org``.
         """
-        current = await self.get_web_browsing_settings(child_id)
-        if not isinstance(current, dict):
-            raise FamilySafetyWebAPIError(
-                "Cannot safely add a blocked website because the current web policy could not be read"
-            )
-        blocked = list(current.get("blockedSites") or current.get("BlockedSites") or [])
-        allowed = list(current.get("allowedSites") or current.get("AllowedSites") or [])
-        if website not in blocked:
-            blocked.append(website)
-        allowed = [site for site in allowed if site != website]
+        site = str(website).strip()
+        if not site.lower().startswith(("http://", "https://")):
+            site = f"https://{site}"
+        return site
+
+    async def block_website(self, child_id: str, website: str) -> dict | None:
+        """Add a website to the blocked list.
+
+        Since 2026-10 the mobile aggregator takes one operation per site:
+        ``{"op": "Add", "path": "/exceptions", "value": {"website": url,
+        "allowed": false}}``; ``allowed: true`` puts it on the allowed list
+        instead. The write answers 204 and the Family Safety app shows the
+        site right away, but the mobile ``GET /v1/WebRestrictions`` still
+        returns ``exceptions: []`` for it, so do not read back through it.
+        Confirmed on a real account on 2026-10-27.
+        """
         result = await self._request(
             "PATCH",
             f"/v1/WebRestrictions/{child_id}",
-            json_data={"blockedSites": blocked, "allowedSites": allowed},
+            json_data={"operations": [{
+                "op": "Add",
+                "path": "/exceptions",
+                "value": {"website": self._website_url(website), "allowed": False},
+            }]},
         )
-        return result if isinstance(result, dict) else None
+        return result if isinstance(result, dict) else {}
+
+    async def allow_website(self, child_id: str, website: str) -> dict | None:
+        """Add a website to the allowed list (see block_website)."""
+        result = await self._request(
+            "PATCH",
+            f"/v1/WebRestrictions/{child_id}",
+            json_data={"operations": [{
+                "op": "Add",
+                "path": "/exceptions",
+                "value": {"website": self._website_url(website), "allowed": True},
+            }]},
+        )
+        return result if isinstance(result, dict) else {}
 
     async def remove_website(self, child_id: str, website: str) -> dict | None:
-        current = await self.get_web_browsing_settings(child_id)
-        if not isinstance(current, dict):
-            raise FamilySafetyWebAPIError(
-                "Cannot safely remove a website because the current web policy could not be read"
-            )
-        blocked_source = current.get("blockedSites") or current.get("BlockedSites") or []
-        allowed_source = current.get("allowedSites") or current.get("AllowedSites") or []
-        blocked = [s for s in blocked_source if s != website]
-        allowed = [s for s in allowed_source if s != website]
+        """Remove a website from the blocked or allowed list.
+
+        The removal takes the URL as a plain string value: an object there
+        makes the aggregator answer 500 ``JsonReaderException``.
+        """
         result = await self._request(
             "PATCH",
             f"/v1/WebRestrictions/{child_id}",
-            json_data={"blockedSites": blocked, "allowedSites": allowed},
+            json_data={"operations": [{
+                "op": "Remove",
+                "path": "/exceptions",
+                "value": self._website_url(website),
+            }]},
         )
-        return result if isinstance(result, dict) else None
+        return result if isinstance(result, dict) else {}
 
     @staticmethod
     def _patch_operations(path: str, value: Any) -> dict[str, Any]:

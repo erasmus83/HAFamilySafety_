@@ -874,6 +874,12 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.web_api.remove_website(child_id, website)
         await self.async_request_refresh()
 
+    async def async_allow_website(self, child_id: str, website: str) -> None:
+        if not self.web_api:
+            raise RuntimeError("Web API not initialized")
+        await self.web_api.allow_website(child_id, website)
+        await self.async_request_refresh()
+
     async def async_toggle_web_filter(self, child_id: str, enabled: bool) -> None:
         if not self.web_api:
             raise RuntimeError("Web API not initialized")

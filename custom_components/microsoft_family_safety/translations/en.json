@@ -383,6 +383,20 @@
     "request_reauth": {
       "name": "Request reauthentication",
       "description": "Start the Microsoft sign-in flow now, for example from a dashboard button, instead of waiting for the integration to detect an expired session."
+    },
+    "allow_website": {
+      "name": "Allow Website",
+      "description": "Add a website to the allowed list of a child account.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "website": {
+          "name": "Website",
+          "description": "The domain to allow."
+        }
+      }
     }
   }
 }

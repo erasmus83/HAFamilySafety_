@@ -383,6 +383,20 @@
     "request_reauth": {
       "name": "Demander une réauthentification",
       "description": "Lance immédiatement la connexion Microsoft, par exemple depuis un bouton de tableau de bord, sans attendre que l'intégration détecte une session expirée."
+    },
+    "allow_website": {
+      "name": "Autoriser un site web",
+      "description": "Ajoute un site web à la liste des sites autorisés d'un compte enfant.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "website": {
+          "name": "Site web",
+          "description": "Le domaine à autoriser."
+        }
+      }
     }
   }
 }
