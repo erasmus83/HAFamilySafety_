@@ -1988,9 +1988,23 @@ class FamilySafetyWebAPI:
         )
         return result if isinstance(result, dict) else None
 
+    @staticmethod
+    def _patch_operations(path: str, value: Any) -> dict[str, Any]:
+        """Body of a mobile-aggregator PATCH since 2026-10 (issue #54).
+
+        WebRestrictions and ContentRestrictions now take a JSON-Patch-like
+        document, ``{"operations": [{"op": "Replace", "path": "/field",
+        "value": ...}]}``. The op is spelled with a capital letter: ``replace``
+        is rejected with a generic "Invalid Payload". Confirmed on 2026-10-27
+        with a real change of ``maxAgeRating`` read back from Microsoft.
+        """
+        return {"operations": [{"op": "Replace", "path": path, "value": value}]}
+
     async def toggle_web_filter(self, child_id: str, enabled: bool) -> dict | None:
         result = await self._request(
-            "PATCH", f"/v1/WebRestrictions/{child_id}", json_data={"isEnabled": enabled}
+            "PATCH",
+            f"/v1/WebRestrictions/{child_id}",
+            json_data=self._patch_operations("/enabled", bool(enabled)),
         )
         return result if isinstance(result, dict) else None
 
@@ -1998,17 +2012,23 @@ class FamilySafetyWebAPI:
         if not 3 <= age <= 21:
             raise ValueError("age must be between 3 and 21")
         result = await self._request(
-            "PATCH", f"/v1/ContentRestrictions/{child_id}", json_data={"maxAgeRating": age}
+            "PATCH",
+            f"/v1/ContentRestrictions/{child_id}",
+            json_data=self._patch_operations("/maxAgeRating", int(age)),
         )
         return result if isinstance(result, dict) else None
 
     async def set_acquisition_policy(
         self, child_id: str, require_approval: bool
     ) -> dict | None:
+        # Same document shape as set_age_rating; the field itself has not
+        # been exercised against a real account yet.
         result = await self._request(
             "PATCH",
             f"/v1/ContentRestrictions/{child_id}",
-            json_data={"acquisitionPolicy": "freeOnly" if require_approval else "unrestricted"},
+            json_data=self._patch_operations(
+                "/acquisitionPolicy", "freeOnly" if require_approval else "unrestricted"
+            ),
         )
         return result if isinstance(result, dict) else None
 
