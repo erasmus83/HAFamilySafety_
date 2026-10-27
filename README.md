@@ -337,21 +337,21 @@ The integration exposes **18 services**, split between the pyfamilysafety librar
 # Lock a child account (sets all screen time to 0, saves current policy)
 service: microsoft_family_safety.lock_account
 data:
-  account_id: "1055519684390826"
+  account_id: "1234567890123456"
 ```
 
 ```yaml
 # Unlock a child account (restores saved policy)
 service: microsoft_family_safety.unlock_account
 data:
-  account_id: "1055519684390826"
+  account_id: "1234567890123456"
 ```
 
 ```yaml
 # Lock a single platform (use lock_account to lock every platform at once)
 service: microsoft_family_safety.lock_platform
 data:
-  account_id: "1055519684390826"
+  account_id: "1234567890123456"
   platform: "Windows"
   duration_hours: 24
 ```
@@ -360,7 +360,7 @@ data:
 # Unlock a single platform
 service: microsoft_family_safety.unlock_platform
 data:
-  account_id: "1055519684390826"
+  account_id: "1234567890123456"
   platform: "Windows"
 ```
 
@@ -370,7 +370,7 @@ data:
 # Block an application
 service: microsoft_family_safety.block_app
 data:
-  account_id: "1055519684390826"
+  account_id: "1234567890123456"
   app_id: "app-uuid"
 ```
 
@@ -378,7 +378,7 @@ data:
 # Unblock an application
 service: microsoft_family_safety.unblock_app
 data:
-  account_id: "1055519684390826"
+  account_id: "1234567890123456"
   app_id: "app-uuid"
 ```
 
@@ -386,7 +386,7 @@ data:
 # Set a per-app daily time limit with allowed window
 service: microsoft_family_safety.set_app_time_limit
 data:
-  account_id: "1055519684390826"
+  account_id: "1234567890123456"
   app_id: "app-uuid"
   app_name: "Minecraft"
   platform: "windows"
@@ -400,7 +400,7 @@ data:
 # Remove a per-app time limit
 service: microsoft_family_safety.remove_app_time_limit
 data:
-  account_id: "1055519684390826"
+  account_id: "1234567890123456"
   app_id: "app-uuid"
   app_name: "Minecraft"
   platform: "windows"
@@ -412,7 +412,7 @@ data:
 # Set daily screen time allowance
 service: microsoft_family_safety.set_screentime_limit
 data:
-  account_id: "1055519684390826"
+  account_id: "1234567890123456"
   day_of_week: 1  # 0=Sunday, 6=Saturday
   hours: 2
   minutes: 0
@@ -422,7 +422,7 @@ data:
 # Set allowed time window (30-min precision)
 service: microsoft_family_safety.set_screentime_intervals
 data:
-  account_id: "1055519684390826"
+  account_id: "1234567890123456"
   day_of_week: 1
   start_hour: 8
   start_minute: 0
@@ -453,15 +453,23 @@ data:
 # Block a website
 service: microsoft_family_safety.block_website
 data:
-  account_id: "1055519684390826"
+  account_id: "1234567890123456"
   website: "example.com"
 ```
 
 ```yaml
-# Remove a blocked website
+# Allow a website (always-allowed list)
+service: microsoft_family_safety.allow_website
+data:
+  account_id: "1234567890123456"
+  website: "example.com"
+```
+
+```yaml
+# Remove a website from the blocked or allowed list
 service: microsoft_family_safety.remove_website
 data:
-  account_id: "1055519684390826"
+  account_id: "1234567890123456"
   website: "example.com"
 ```
 
@@ -469,7 +477,7 @@ data:
 # Toggle web content filtering
 service: microsoft_family_safety.toggle_web_filter
 data:
-  account_id: "1055519684390826"
+  account_id: "1234567890123456"
   enabled: true
 ```
 
@@ -479,7 +487,7 @@ data:
 # Set age rating (PEGI 3-20, or 21 for unrestricted)
 service: microsoft_family_safety.set_age_rating
 data:
-  account_id: "1055519684390826"
+  account_id: "1234567890123456"
   age: 12
 ```
 
@@ -487,7 +495,7 @@ data:
 # Enable or disable ask-to-buy
 service: microsoft_family_safety.set_acquisition_policy
 data:
-  account_id: "1055519684390826"
+  account_id: "1234567890123456"
   require_approval: true
 ```
 
@@ -563,7 +571,7 @@ automation:
     action:
       - action: microsoft_family_safety.set_screentime_limit
         data:
-          account_id: "1055519684390826"
+          account_id: "1234567890123456"
           day_of_week: "{{ now().weekday() }}"
           hours: 1
           minutes: 30
@@ -784,7 +792,7 @@ Used for read operations and app management. Token-based, no browser session req
 
 ```json
 {
-  "userId": "1055519684390826",
+  "userId": "1234567890123456",
   "isEnabled": true,
   "dailyRestrictions": {
     "monday": {
