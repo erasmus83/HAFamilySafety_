@@ -476,7 +476,11 @@ def _patch_combined_client_data_sources() -> bool:
         self.web_browsing_source = None
         self.web_browsing_status = "checking"
         try:
-            result = await self._request("GET", f"/v1/WebRestrictions/{child_id}")
+            # Without exceptions=true the blocked/allowed sites come back as an
+            # empty list (the Family Safety app always asks for them, #64).
+            result = await self._request(
+                "GET", f"/v1/WebRestrictions/{child_id}", params={"exceptions": "true"}
+            )
         except Exception as err:
             self.web_browsing_status = "mobile_error"
             _LOGGER.debug(
@@ -486,6 +490,15 @@ def _patch_combined_client_data_sources() -> bool:
             )
         else:
             if isinstance(result, dict):
+                exceptions = result.get("exceptions")
+                if isinstance(exceptions, list):
+                    sites = [e for e in exceptions if isinstance(e, dict) and e.get("website")]
+                    result.setdefault(
+                        "blockedSites", [e["website"] for e in sites if not e.get("allowed")]
+                    )
+                    result.setdefault(
+                        "allowedSites", [e["website"] for e in sites if e.get("allowed")]
+                    )
                 self.web_browsing_source = "mobile"
                 self.web_browsing_status = "ok"
                 _LOGGER.debug(
@@ -529,9 +542,19 @@ def _patch_combined_client_data_sources() -> bool:
         self, child_id: str, platform: str = "Windows",
         *, require_child_match: bool = False,
     ):
-        """Read the active Windows/per-device policy exactly as seen in the HAR."""
+        """Read the Windows policy: mobile API first, Family web /st as fallback."""
         self.screentime_policy_status = "checking"
         self.screentime_policy_source = None
+
+        try:
+            policy = await self.get_mobile_screentime_policy(child_id, platform)
+        except Exception as err:  # noqa: BLE001 - fall back to the web path
+            _LOGGER.debug("Mobile screen-time schedule read failed: %r", err)
+            policy = None
+        if policy is not None:
+            self.screentime_policy_status = "ok"
+            self.screentime_policy_source = "mobile_v4"
+            return policy
 
         now = time.monotonic()
         backoff_until = float(getattr(self, "_family_web_backoff_until", 0.0) or 0.0)

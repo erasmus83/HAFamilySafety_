@@ -7,9 +7,10 @@
         "data": {
           "update_interval": "Update interval (seconds)",
           "platforms": "Monitored platforms",
-          "auth_url": "Legacy auth add-on URL (optional)",
-          "api_key": "Legacy add-on API key (optional)",
           "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)"
+        },
+        "data_description": {
+          "platforms": "Windows, Xbox, Mobile: one lock switch per ticked platform. Ticking Xbox also turns on Xbox play time and the Xbox lock, which need the Microsoft web session (some accounts must renew it with a sign-in every 24 hours). Leave Xbox unticked if the children have no Xbox: the integration then runs on the mobile token only, with a shorter sign-in."
         }
       },
       "auth": {
@@ -86,9 +87,10 @@
         "data": {
           "update_interval": "Update interval (seconds)",
           "platforms": "Monitored platforms",
-          "auth_url": "Legacy auth add-on URL (optional)",
-          "api_key": "Legacy add-on API key (optional)",
           "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)"
+        },
+        "data_description": {
+          "platforms": "Windows, Xbox, Mobile: one lock switch per ticked platform. Ticking Xbox also turns on Xbox play time and the Xbox lock, which need the Microsoft web session (some accounts must renew it with a sign-in every 24 hours). Leave Xbox unticked if the children have no Xbox: the integration then runs on the mobile token only, with a shorter sign-in."
         }
       }
     }
@@ -383,6 +385,20 @@
     "request_reauth": {
       "name": "Request reauthentication",
       "description": "Start the Microsoft sign-in flow now, for example from a dashboard button, instead of waiting for the integration to detect an expired session."
+    },
+    "allow_website": {
+      "name": "Allow Website",
+      "description": "Add a website to the allowed list of a child account.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "website": {
+          "name": "Website",
+          "description": "The domain to allow."
+        }
+      }
     }
   }
 }

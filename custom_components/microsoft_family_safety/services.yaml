@@ -327,6 +327,23 @@ block_website:
       selector:
         text:
 
+allow_website:
+  name: Allow Website
+  description: Add a website to the allowed list of a child account.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    website:
+      name: Website
+      description: The domain to allow (e.g., "example.com").
+      required: true
+      selector:
+        text:
+
 remove_website:
   name: Remove Website
   description: Remove a website from blocked/allowed list.

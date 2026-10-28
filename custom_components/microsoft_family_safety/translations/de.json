@@ -7,9 +7,10 @@
         "data": {
           "update_interval": "Aktualisierungsintervall (Sekunden)",
           "platforms": "Überwachte Plattformen",
-          "auth_url": "URL des Legacy-Auth-Add-ons (optional)",
-          "api_key": "API-Schlüssel des Legacy-Add-ons (optional)",
           "allow_insecure_http_auth": "Unsichere lokale HTTP-Anmeldung erlauben (nur zum Testen)"
+        },
+        "data_description": {
+          "platforms": "Windows, Xbox, Mobile: ein Sperrschalter pro ausgewählter Plattform. Xbox aktiviert außerdem die Xbox-Spielzeit und die Xbox-Sperre, die die Microsoft-Websitzung benötigen (manche Konten müssen sie alle 24 Stunden mit einer Anmeldung erneuern). Xbox nicht auswählen, wenn die Kinder keine Xbox haben: Die Integration nutzt dann nur das mobile Token, mit einer kürzeren Anmeldung."
         }
       },
       "auth": {
@@ -86,9 +87,10 @@
         "data": {
           "update_interval": "Aktualisierungsintervall (Sekunden)",
           "platforms": "Überwachte Plattformen",
-          "auth_url": "URL des Legacy-Auth-Add-ons (optional)",
-          "api_key": "API-Schlüssel des Legacy-Add-ons (optional)",
           "allow_insecure_http_auth": "Unsichere lokale HTTP-Anmeldung erlauben (nur zum Testen)"
+        },
+        "data_description": {
+          "platforms": "Windows, Xbox, Mobile: ein Sperrschalter pro ausgewählter Plattform. Xbox aktiviert außerdem die Xbox-Spielzeit und die Xbox-Sperre, die die Microsoft-Websitzung benötigen (manche Konten müssen sie alle 24 Stunden mit einer Anmeldung erneuern). Xbox nicht auswählen, wenn die Kinder keine Xbox haben: Die Integration nutzt dann nur das mobile Token, mit einer kürzeren Anmeldung."
         }
       }
     }
@@ -383,6 +385,20 @@
     "request_reauth": {
       "name": "Erneute Anmeldung anfordern",
       "description": "Startet die Microsoft-Anmeldung sofort, zum Beispiel über eine Dashboard-Schaltfläche, statt zu warten, bis die Integration eine abgelaufene Sitzung erkennt."
+    },
+    "allow_website": {
+      "name": "Website erlauben",
+      "description": "Fügt eine Website der Liste erlaubter Websites eines Kinderkontos hinzu.",
+      "fields": {
+        "account_id": {
+          "name": "Konto-ID",
+          "description": "Die Benutzer-ID des Kinderkontos."
+        },
+        "website": {
+          "name": "Website",
+          "description": "Die zu erlaubende Domain."
+        }
+      }
     }
   }
 }

@@ -378,17 +378,7 @@ class MicrosoftFamilyAuthProxy:
         return self._family_referer
 
     def export_cookies(self) -> list[dict[str, Any]]:
-        """Return the Microsoft cookies required by the web session.
-
-        Microsoft, Live and (fork experiment) microsoftonline.com cookies. The
-        Family web app is an MSAL single-page app: Microsoft caps its refresh
-        token at 24 h, after which it must authorize again at
-        login.microsoftonline.com. A browser passes that silently with the
-        session cookies login.microsoftonline.com set during the interactive
-        sign-in (ESTSAUTH*); without them the bootstrap lands on an interactive
-        page -- the daily "signin_required" of #52. The runtime session keeps
-        cookies of every domain once it has them, so this hand-over is the
-        only place they were lost.
+        """Return only Microsoft/Live cookies required by the web session.
 
         Akamai bot-manager cookies are excluded: they are bound to the user's
         browser fingerprint and make Microsoft hang up on any other client that
@@ -403,20 +393,7 @@ class MicrosoftFamilyAuthProxy:
                 cookies.append(_cookie_dict(cookie))
             elif domain == "live.com" or domain.endswith(".live.com"):
                 cookies.append(_cookie_dict(cookie))
-            elif domain == "microsoftonline.com" or domain.endswith(".microsoftonline.com"):
-                cookies.append(_cookie_dict(cookie))
         return cookies
-
-    def microsoftonline_cookie_names(self) -> list[str]:
-        """Names (never values) of the login.microsoftonline.com cookies held,
-        for the sign-in diagnostic log."""
-        return sorted(
-            {
-                cookie.name
-                for cookie in self._client.cookies.jar
-                if (cookie.domain or "").lstrip(".").lower().endswith("microsoftonline.com")
-            }
-        )
 
     async def async_close(self) -> None:
         if self._closed:
