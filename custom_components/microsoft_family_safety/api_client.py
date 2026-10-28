@@ -179,6 +179,8 @@ class FamilySafetyWebAPI:
         #: Set once the mobile /v4 schedule API answered; schedules then no
         #: longer depend on the Family web context.
         self.mobile_schedule_ok = False
+        #: child id -> (time.monotonic(), payload) of the last schedules GET.
+        self._mobile_schedule_cache: dict[str, tuple[float, dict]] = {}
         # Keep authentication health separate from endpoint-specific failures.
         # A private endpoint may return 401/403 while the account.microsoft.com
         # Family browser session itself is still authenticated.
@@ -1883,7 +1885,17 @@ class FamilySafetyWebAPI:
     def _mobile_now() -> str:
         return datetime.now().astimezone().isoformat(timespec="seconds")
 
-    async def _get_mobile_schedules(self, child_id: str) -> dict:
+    async def _get_mobile_schedules(self, child_id: str, *, max_age: float = 0.0) -> dict:
+        """GET the child's schedules (Windows and Xbox in one payload).
+
+        ``max_age`` lets a read reuse a payload fetched moments ago in the same
+        poll (the Xbox read right after the Windows one). Writes always pass 0:
+        they rebuild the day from what Microsoft holds right now.
+        """
+        key = str(child_id)
+        cached = self._mobile_schedule_cache.get(key)
+        if max_age > 0 and cached and time.monotonic() - cached[0] <= max_age:
+            return cached[1]
         result = await self._request(
             "GET",
             f"/v4/devicelimits/schedules/{child_id}",
@@ -1892,6 +1904,7 @@ class FamilySafetyWebAPI:
         )
         if not isinstance(result, dict):
             raise FamilySafetyWebAPIError("Mobile schedule response was empty")
+        self._mobile_schedule_cache[key] = (time.monotonic(), result)
         return result
 
     @staticmethod
@@ -1981,6 +1994,51 @@ class FamilySafetyWebAPI:
         self.mobile_schedule_ok = True
         return {"isEnabled": schedule.get("enabled"), "appliesTo": schedule.get("appliesTo"),
                 "dailyRestrictions": daily}
+
+    @classmethod
+    def _convert_mobile_schedule(cls, schedule: dict) -> dict | None:
+        daily: dict[str, dict[str, Any]] = {}
+        for day, data in (schedule.get("dailyRestrictions") or {}).items():
+            if not isinstance(data, dict):
+                continue
+            seconds = int(data.get("allowance") or 0) // 1000
+            intervals = data.get("allottedIntervals") or []
+            slots = cls._intervals_to_slots(intervals)
+            daily[day] = {
+                "allowance": f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}",
+                "allottedIntervals": intervals,
+                "allowedIntervals": slots,
+                "timeline": slots,
+            }
+        if not daily:
+            return None
+        return {"isEnabled": schedule.get("enabled"), "appliesTo": schedule.get("appliesTo"),
+                "dailyRestrictions": daily}
+
+    async def get_mobile_xbox_screentime_policy(self, child_id: str) -> dict | None:
+        """The child's Xbox schedule, from the same mobile payload as Windows.
+
+        Accounts in "PerDeviceType" mode have a separate Xbox schedule, which
+        is what the console enforces. It comes back in the Windows GET, so a
+        payload fetched moments ago in the same poll is reused. Never touches
+        ``mobile_schedule_ok``: that flag is about the Windows schedule.
+        """
+        payload = await self._get_mobile_schedules(child_id, max_age=30.0)
+        schedule = self._mobile_platform_schedule(payload, "Xbox")
+        if schedule is None:
+            return None
+        return self._convert_mobile_schedule(schedule)
+
+    async def set_mobile_xbox_screentime_allowance(
+        self, child_id: str, day_of_week: int, hours: int, minutes: int
+    ) -> bool:
+        await self._patch_mobile_day(
+            child_id,
+            day_of_week,
+            allowance_ms=(int(hours) * 60 + int(minutes)) * 60_000,
+            platform="Xbox",
+        )
+        return True
 
     async def _patch_mobile_day(
         self,

@@ -88,6 +88,13 @@ async def async_setup_entry(
                 )
             )
 
+            # Xbox schedule on/off (the console's own limits, PerDeviceType).
+            entities.append(
+                FamilySafetyXboxScheduleSwitch(
+                    coordinator, entry, account_id, account_name,
+                )
+            )
+
             # Per-child "App, feature, and game limits" switch: per-app limits
             # are only enforced while it is on.
             entities.append(
@@ -505,3 +512,57 @@ class FamilySafetyAppLimitsSwitch(CoordinatorEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         _LOGGER.info("Disabling app limits for %s", self._account_name)
         await self._async_set(False)
+
+
+class FamilySafetyXboxScheduleSwitch(CoordinatorEntity, SwitchEntity):
+    """Turn the child's Xbox schedule on or off (the days are kept).
+
+    Mirrors the Xbox screen time toggle of the Family Safety app. While it is
+    on, the console enforces the "Xbox <day> Limit" values.
+    """
+
+    def __init__(
+        self,
+        coordinator: FamilySafetyDataUpdateCoordinator,
+        entry: ConfigEntry,
+        account_id: str,
+        account_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._account_id = account_id
+        self._account_name = account_name
+        self._attr_unique_id = f"{entry.entry_id}_{account_id}_xbox_schedule"
+        self._attr_name = f"{account_name} Xbox Screen Time Limits"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._account_id)},
+            name=f"{self._account_name} (Family Safety)",
+            manufacturer="Microsoft",
+            model="Family Safety Account",
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        account = (self.coordinator.data or {}).get("accounts", {}).get(self._account_id) or {}
+        policy = account.get("xbox_screentime_policy")
+        if not isinstance(policy, dict) or not isinstance(policy.get("isEnabled"), bool):
+            return None
+        return policy["isEnabled"]
+
+    @property
+    def icon(self) -> str:
+        return "mdi:microsoft-xbox" if self.is_on else "mdi:microsoft-xbox-controller-off"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {ATTR_USER_ID: self._account_id}
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        _LOGGER.info("Enabling Xbox screen time limits for %s", self._account_name)
+        await self.coordinator.async_set_xbox_schedule_enabled(self._account_id, True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        _LOGGER.info("Disabling Xbox screen time limits for %s", self._account_name)
+        await self.coordinator.async_set_xbox_schedule_enabled(self._account_id, False)

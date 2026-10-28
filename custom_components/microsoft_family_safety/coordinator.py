@@ -876,6 +876,48 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         await self.async_request_refresh()
 
+    def _set_xbox_policy_field(self, child_id: str, update) -> None:
+        account = ((self.data or {}).get("accounts") or {}).get(child_id)
+        policy = account.get("xbox_screentime_policy") if isinstance(account, dict) else None
+        if isinstance(policy, dict):
+            update(policy)
+            self.async_update_listeners()
+
+    async def async_set_xbox_screentime_limit(
+        self, child_id: str, day_of_week: int, hours: int, minutes: int
+    ) -> None:
+        """Set one day of the Xbox schedule (the one the console enforces)."""
+        if not self.web_api:
+            raise RuntimeError("Web API not initialized")
+        if not 0 <= day_of_week <= 6:
+            raise ValueError("day_of_week must be between 0 and 6")
+        if hours < 0 or minutes < 0 or minutes > 59 or hours * 60 + minutes > 1440:
+            raise ValueError("screen-time allowance must be between 0 and 24 hours")
+        await self.web_api.set_mobile_xbox_screentime_allowance(
+            child_id, day_of_week, hours, minutes
+        )
+        day = DAY_KEYS[day_of_week]
+
+        def _update(policy: dict) -> None:
+            entry = (policy.get("dailyRestrictions") or {}).get(day)
+            if isinstance(entry, dict):
+                entry["allowance"] = f"{hours:02d}:{minutes:02d}:00"
+
+        self._set_xbox_policy_field(child_id, _update)
+        await self.async_request_refresh()
+
+    async def async_set_xbox_schedule_enabled(self, child_id: str, enabled: bool) -> None:
+        """Turn the Xbox schedule on or off, keeping its days as they are."""
+        if not self.web_api:
+            raise RuntimeError("Web API not initialized")
+        await self.web_api.set_mobile_schedule_enabled(child_id, enabled, platform="Xbox")
+
+        def _update(policy: dict) -> None:
+            policy["isEnabled"] = bool(enabled)
+
+        self._set_xbox_policy_field(child_id, _update)
+        await self.async_request_refresh()
+
     async def async_set_app_limits_enabled(self, child_id: str, enabled: bool) -> None:
         if not self.web_api:
             raise RuntimeError("Web API not initialized")
@@ -1370,6 +1412,12 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Microsoft account session is authenticated; keeping reauth disabled "
                 "and treating this as Family API context/authentication failure"
             )
+        try:
+            result["xbox_screentime_policy"] = (
+                await self.web_api.get_mobile_xbox_screentime_policy(account_id)
+            )
+        except Exception as err:
+            _LOGGER.debug("Could not fetch the Xbox schedule: %r", err)
         return result
 
     def _request_reauth(self, reason: str) -> None:
@@ -1543,7 +1591,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # it applies only to configuration/policy payloads and never
                 # modifies measured usage values.
                 previous = ((self.data or {}).get("accounts", {}).get(account_id) or {})
-                for key in ("web_browsing", "content_settings", "screentime_policy", "app_limits_enabled"):
+                for key in ("web_browsing", "content_settings", "screentime_policy", "app_limits_enabled", "xbox_screentime_policy"):
                     if web_data.get(key) is None and previous.get(key) is not None:
                         web_data[key] = previous.get(key)
                 accounts_data[account_id].update(web_data)
