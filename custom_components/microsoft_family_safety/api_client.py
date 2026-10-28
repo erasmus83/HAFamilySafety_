@@ -1956,6 +1956,7 @@ class FamilySafetyWebAPI:
                 await self._get_mobile_schedules(child_id), platform
             )
             if schedule is None:
+                self.mobile_schedule_ok = False
                 return None
             daily: dict[str, dict[str, Any]] = {}
             for day, data in (schedule.get("dailyRestrictions") or {}).items():
@@ -1975,6 +1976,7 @@ class FamilySafetyWebAPI:
             self.mobile_schedule_ok = False
             raise
         if not daily:
+            self.mobile_schedule_ok = False
             return None
         self.mobile_schedule_ok = True
         return {"isEnabled": schedule.get("enabled"), "appliesTo": schedule.get("appliesTo"),
