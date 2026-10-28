@@ -88,6 +88,14 @@ async def async_setup_entry(
                 )
             )
 
+            # Per-child "App, feature, and game limits" switch: per-app limits
+            # are only enforced while it is on.
+            entities.append(
+                FamilySafetyAppLimitsSwitch(
+                    coordinator, entry, account_id, account_name,
+                )
+            )
+
         if entities:
             async_add_entities(entities)
 
@@ -433,3 +441,67 @@ class FamilySafetyScreenTimePolicySwitch(CoordinatorEntity, SwitchEntity):
             self._optimistic_state = None
             self.async_write_ha_state()
             raise
+
+
+class FamilySafetyAppLimitsSwitch(CoordinatorEntity, SwitchEntity):
+    """Per-child "App, feature, and game limits" switch.
+
+    Mirrors the toggle above the app list on family.microsoft.com: while it
+    is off, the limits set on individual apps are kept but not enforced.
+    """
+
+    def __init__(
+        self,
+        coordinator: FamilySafetyDataUpdateCoordinator,
+        entry: ConfigEntry,
+        account_id: str,
+        account_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._account_id = account_id
+        self._account_name = account_name
+        self._attr_unique_id = f"{entry.entry_id}_{account_id}_app_limits"
+        self._attr_name = f"{account_name} App Limits"
+        self._optimistic_state: bool | None = None
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._account_id)},
+            name=f"{self._account_name} (Family Safety)",
+            manufacturer="Microsoft",
+            model="Family Safety Account",
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        if self._optimistic_state is not None:
+            return self._optimistic_state
+        account = (self.coordinator.data or {}).get("accounts", {}).get(self._account_id) or {}
+        value = account.get("app_limits_enabled")
+        return value if isinstance(value, bool) else None
+
+    @property
+    def icon(self) -> str:
+        return "mdi:apps-box" if self.is_on else "mdi:apps"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {ATTR_USER_ID: self._account_id}
+
+    async def _async_set(self, enabled: bool) -> None:
+        self._optimistic_state = enabled
+        self.async_write_ha_state()
+        try:
+            await self.coordinator.async_set_app_limits_enabled(self._account_id, enabled)
+        finally:
+            self._optimistic_state = None
+            self.async_write_ha_state()
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        _LOGGER.info("Enabling app limits for %s", self._account_name)
+        await self._async_set(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        _LOGGER.info("Disabling app limits for %s", self._account_name)
+        await self._async_set(False)

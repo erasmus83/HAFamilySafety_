@@ -476,7 +476,11 @@ def _patch_combined_client_data_sources() -> bool:
         self.web_browsing_source = None
         self.web_browsing_status = "checking"
         try:
-            result = await self._request("GET", f"/v1/WebRestrictions/{child_id}")
+            # Without exceptions=true the blocked/allowed sites come back as an
+            # empty list (the Family Safety app always asks for them, #64).
+            result = await self._request(
+                "GET", f"/v1/WebRestrictions/{child_id}", params={"exceptions": "true"}
+            )
         except Exception as err:
             self.web_browsing_status = "mobile_error"
             _LOGGER.debug(
@@ -486,6 +490,15 @@ def _patch_combined_client_data_sources() -> bool:
             )
         else:
             if isinstance(result, dict):
+                exceptions = result.get("exceptions")
+                if isinstance(exceptions, list):
+                    sites = [e for e in exceptions if isinstance(e, dict) and e.get("website")]
+                    result.setdefault(
+                        "blockedSites", [e["website"] for e in sites if not e.get("allowed")]
+                    )
+                    result.setdefault(
+                        "allowedSites", [e["website"] for e in sites if e.get("allowed")]
+                    )
                 self.web_browsing_source = "mobile"
                 self.web_browsing_status = "ok"
                 _LOGGER.debug(

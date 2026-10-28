@@ -1884,6 +1884,65 @@ class FamilySafetyWebAPI:
         )
         return result if isinstance(result, dict) else None
 
+    # App time limits (mobile aggregator, v3/AppLimits/policies), as the
+    # Family Safety app sends them since 2026-10 (capture shared on #64):
+    # days at the top level, allowance in milliseconds, intervals as
+    # {"start", "end"} in 12-hour .NET format ("07:00:00 AM"), whole day =
+    # "12:00:00 AM" to "12:00:00 AM" with intervalsEnabled false. Removing a
+    # limit is the same PATCH without the day keys.
+    _APP_LIMIT_PLATFORMS = {"windows": "Windows", "xbox": "Xbox", "mobile": "Mobile"}
+
+    @staticmethod
+    def _to_12h(value: str) -> str:
+        parts = [int(p) for p in str(value).strip().split(":")[:3]] + [0, 0]
+        hours = parts[0] % 24
+        suffix = "AM" if hours < 12 else "PM"
+        hours12 = hours % 12 or 12
+        return f"{hours12:02d}:{parts[1]:02d}:{parts[2]:02d} {suffix}"
+
+    @staticmethod
+    def _duration_to_ms(value: str) -> int:
+        parts = [int(p) for p in str(value).strip().split(":")[:3]] + [0, 0]
+        return ((parts[0] * 60 + parts[1]) * 60 + parts[2]) * 1000
+
+    def _app_limit_base(self, app_id: str, display_name: str) -> dict[str, Any]:
+        return {
+            "appId": app_id,
+            "displayName": display_name or app_id,
+            "enabled": True,
+            "blockState": "NotBlocked",
+            "appTimeEnforcementPolicy": "Custom",
+            "alternateAppIds": [],
+        }
+
+    async def get_app_limits_enabled(self, child_id: str, platform: str = "Windows") -> bool | None:
+        """Read the per-child "App, feature, and game limits" switch.
+
+        While it is off, no per-app limit is enforced even though the limits
+        stay stored. GET v2/AppLimits/settings/{child} with Plat-Info answers
+        {"enabled": bool, "lastModified": ...}.
+        """
+        result = await self._request(
+            "GET",
+            f"/v2/AppLimits/settings/{child_id}",
+            extra_headers={"Plat-Info": platform},
+        )
+        if isinstance(result, dict) and isinstance(result.get("enabled"), bool):
+            return result["enabled"]
+        return None
+
+    async def set_app_limits_enabled(
+        self, child_id: str, enabled: bool, platform: str = "Windows"
+    ) -> bool:
+        """Turn the per-child app limits switch on or off (204 on success)."""
+        await self._request(
+            "PATCH",
+            f"/v2/AppLimits/settings/{child_id}",
+            json_data={"enabled": bool(enabled)},
+            extra_headers={"Plat-Info": platform},
+        )
+        return True
+
     async def set_app_time_limit(
         self,
         child_id: str,
@@ -1894,57 +1953,39 @@ class FamilySafetyWebAPI:
         start_time: str = "07:00:00",
         end_time: str = "22:00:00",
     ) -> dict | None:
-        day_schedule = {
-            "allowance": allowance,
-            "allottedIntervalsEnabled": True,
-            "allottedIntervals": [{"start": start_time, "end": end_time}],
+        """Set the same daily limit (and allowed window) on every day."""
+        start = self._to_12h(start_time)
+        end = self._to_12h(end_time)
+        whole_day = start == end
+        day = {
+            "allowance": self._duration_to_ms(allowance),
+            "intervalsEnabled": not whole_day,
+            "intervals": [{"start": start, "end": end}],
         }
-        policy = {
-            # These identity/state fields are present in pyfamilysafety 1.1.2's
-            # working set_app_policy payload for the same mobile endpoint.
-            "appId": app_id,
-            "displayName": display_name or app_id,
-            "enabled": True,
-            "blocked": False,
-            "blockState": "NotBlocked",
-            "appTimeEnforcementPolicy": "custom",
-            **{day: day_schedule for day in DAY_KEYS},
-        }
-        platform_header = {
-            "windows": "WINDOWS",
-            "xbox": "XBOX",
-            "mobile": "MOBILE",
-        }.get(str(platform).lower(), str(platform).upper())
+        body = {**self._app_limit_base(app_id, display_name), **{d: day for d in DAY_KEYS}}
         result = await self._request(
             "PATCH",
-            f"/v3/appLimits/policies/{child_id}/{app_id}",
-            json_data=policy,
-            extra_headers={"Plat-Info": platform_header},
+            f"/v3/AppLimits/policies/{child_id}/{app_id}",
+            json_data=body,
+            extra_headers={
+                "Plat-Info": self._APP_LIMIT_PLATFORMS.get(str(platform).lower(), "Windows")
+            },
         )
-        return result if isinstance(result, dict) else None
+        return result if isinstance(result, dict) else {}
 
     async def remove_app_time_limit(
         self, child_id: str, app_id: str, display_name: str, platform: str
     ) -> dict | None:
-        platform_header = {
-            "windows": "WINDOWS",
-            "xbox": "XBOX",
-            "mobile": "MOBILE",
-        }.get(str(platform).lower(), str(platform).upper())
+        """Remove the app's time limit: the same PATCH without the day keys."""
         result = await self._request(
             "PATCH",
-            f"/v3/appLimits/policies/{child_id}/{app_id}",
-            json_data={
-                "appId": app_id,
-                "displayName": display_name or app_id,
-                "enabled": False,
-                "blocked": False,
-                "blockState": "NotBlocked",
-                "appTimeEnforcementPolicy": "custom",
+            f"/v3/AppLimits/policies/{child_id}/{app_id}",
+            json_data=self._app_limit_base(app_id, display_name),
+            extra_headers={
+                "Plat-Info": self._APP_LIMIT_PLATFORMS.get(str(platform).lower(), "Windows")
             },
-            extra_headers={"Plat-Info": platform_header},
         )
-        return result if isinstance(result, dict) else None
+        return result if isinstance(result, dict) else {}
 
     @staticmethod
     def _website_url(website: str) -> str:

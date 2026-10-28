@@ -862,6 +862,12 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         await self.async_request_refresh()
 
+    async def async_set_app_limits_enabled(self, child_id: str, enabled: bool) -> None:
+        if not self.web_api:
+            raise RuntimeError("Web API not initialized")
+        await self.web_api.set_app_limits_enabled(child_id, enabled)
+        await self.async_request_refresh()
+
     async def async_block_website(self, child_id: str, website: str) -> None:
         if not self.web_api:
             raise RuntimeError("Web API not initialized")
@@ -1287,6 +1293,12 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:
             _LOGGER.debug("Could not fetch content settings: %r", err)
         try:
+            result["app_limits_enabled"] = await self.web_api.get_app_limits_enabled(
+                account_id
+            )
+        except Exception as err:
+            _LOGGER.debug("Could not fetch the app limits switch: %r", err)
+        try:
             screentime = await self._fetch_screentime_policy(account_id)
             expired = (
                 self.web_api.web_session_state == "expired"
@@ -1488,7 +1500,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # it applies only to configuration/policy payloads and never
                 # modifies measured usage values.
                 previous = ((self.data or {}).get("accounts", {}).get(account_id) or {})
-                for key in ("web_browsing", "content_settings", "screentime_policy"):
+                for key in ("web_browsing", "content_settings", "screentime_policy", "app_limits_enabled"):
                     if web_data.get(key) is None and previous.get(key) is not None:
                         web_data[key] = previous.get(key)
                 accounts_data[account_id].update(web_data)
