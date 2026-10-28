@@ -1892,7 +1892,6 @@ class FamilySafetyWebAPI:
         )
         if not isinstance(result, dict):
             raise FamilySafetyWebAPIError("Mobile schedule response was empty")
-        self.mobile_schedule_ok = True
         return result
 
     @staticmethod
@@ -1904,8 +1903,14 @@ class FamilySafetyWebAPI:
 
     @staticmethod
     def _time_to_slot(value: str, *, ceil: bool) -> int:
-        parts = [int(p) for p in str(value).split(":")[:3]] + [0, 0]
-        minutes = parts[0] * 60 + parts[1] + (1 if parts[2] else 0)
+        # .NET TimeSpan: midnight at the end of the day is "1.00:00:00".
+        text = str(value).strip()
+        days = 0
+        if "." in text.split(":")[0]:
+            day_part, text = text.split(".", 1)
+            days = int(day_part or 0)
+        parts = [int(float(p)) for p in text.split(":")[:3]] + [0, 0]
+        minutes = days * 1440 + parts[0] * 60 + parts[1] + (1 if parts[2] else 0)
         slot = minutes // 30 + (1 if ceil and minutes % 30 else 0)
         return max(0, min(48, slot))
 
@@ -1927,7 +1932,7 @@ class FamilySafetyWebAPI:
     def _slots_to_intervals(slots: list[bool]) -> list[dict[str, str]]:
         def fmt(slot: int) -> str:
             if slot >= 48:
-                return "23:59:59"
+                return "1.00:00:00"
             return f"{slot // 2:02d}:{30 if slot % 2 else 0:02d}:00"
 
         intervals: list[dict[str, str]] = []
@@ -1941,23 +1946,34 @@ class FamilySafetyWebAPI:
         return intervals
 
     async def get_mobile_screentime_policy(self, child_id: str, platform: str = "Windows") -> dict | None:
-        """Return the child's schedule in the shape the entities read (allowance "HH:MM:SS")."""
-        schedule = self._mobile_platform_schedule(await self._get_mobile_schedules(child_id), platform)
-        if schedule is None:
-            return None
-        daily: dict[str, dict[str, Any]] = {}
-        for day, data in (schedule.get("dailyRestrictions") or {}).items():
-            if not isinstance(data, dict):
-                continue
-            seconds = int(data.get("allowance") or 0) // 1000
-            intervals = data.get("allottedIntervals") or []
-            daily[day] = {
-                "allowance": f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}",
-                "allottedIntervals": intervals,
-                "allowedIntervals": self._intervals_to_slots(intervals),
-            }
+        """Return the child's schedule in the shape the entities read (allowance "HH:MM:SS").
+
+        ``mobile_schedule_ok`` silences the daily web reauth, so it turns true
+        only once a policy was actually produced and false on any failure.
+        """
+        try:
+            schedule = self._mobile_platform_schedule(
+                await self._get_mobile_schedules(child_id), platform
+            )
+            if schedule is None:
+                return None
+            daily: dict[str, dict[str, Any]] = {}
+            for day, data in (schedule.get("dailyRestrictions") or {}).items():
+                if not isinstance(data, dict):
+                    continue
+                seconds = int(data.get("allowance") or 0) // 1000
+                intervals = data.get("allottedIntervals") or []
+                daily[day] = {
+                    "allowance": f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}",
+                    "allottedIntervals": intervals,
+                    "allowedIntervals": self._intervals_to_slots(intervals),
+                }
+        except Exception:
+            self.mobile_schedule_ok = False
+            raise
         if not daily:
             return None
+        self.mobile_schedule_ok = True
         return {"isEnabled": schedule.get("enabled"), "appliesTo": schedule.get("appliesTo"),
                 "dailyRestrictions": daily}
 
