@@ -1963,10 +1963,13 @@ class FamilySafetyWebAPI:
                     continue
                 seconds = int(data.get("allowance") or 0) // 1000
                 intervals = data.get("allottedIntervals") or []
+                slots = self._intervals_to_slots(intervals)
                 daily[day] = {
                     "allowance": f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}",
                     "allottedIntervals": intervals,
-                    "allowedIntervals": self._intervals_to_slots(intervals),
+                    "allowedIntervals": slots,
+                    # The lock/unlock restore reads 48 booleans only from "timeline".
+                    "timeline": slots,
                 }
         except Exception:
             self.mobile_schedule_ok = False
@@ -2010,6 +2013,24 @@ class FamilySafetyWebAPI:
             "PATCH", f"/v4/devicelimits/schedules/{child_id}",
             json_data=body, extra_headers={"Plat-Info": "Windows"},
         )
+
+    async def set_mobile_schedule_enabled(
+        self, child_id: str, enabled: bool, platform: str = "Windows"
+    ) -> bool:
+        """Turn the platform's weekly schedule on or off, keeping its days intact."""
+        payload = await self._get_mobile_schedules(child_id)
+        await self._request(
+            "PATCH", f"/v4/devicelimits/schedules/{child_id}",
+            json_data={
+                "enabled": bool(enabled),
+                "appliesTo": platform,
+                "culture": "en-us",
+                "mode": payload.get("mode") or "PerDeviceType",
+                "time": self._mobile_now(),
+            },
+            extra_headers={"Plat-Info": "Windows"},
+        )
+        return True
 
     async def set_mobile_screentime_allowance(
         self, child_id: str, day_of_week: int, hours: int, minutes: int

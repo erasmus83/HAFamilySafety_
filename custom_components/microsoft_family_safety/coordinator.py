@@ -1140,6 +1140,8 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         policy = (account or {}).get("screentime_policy")
         if not isinstance(policy, dict):
             return None
+        if policy.get("isEnabled") is False:
+            return False
         daily = policy.get("dailyRestrictions") or policy.get("DailyRestrictions")
         if not isinstance(daily, dict):
             return None
@@ -1151,6 +1153,17 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return False
 
     async def async_set_policy_enabled(self, account_id: str, enabled: bool) -> None:
+        # The app's weekly switch is the schedule's own "enabled" flag: Microsoft
+        # keeps every day as it is. The 24 h rewrite below is the web fallback,
+        # and a restore point it left behind is still restored on enable.
+        has_saved = self._policy_key(account_id) in self._saved_screentime
+        if self.web_api is not None and not (enabled and has_saved):
+            try:
+                await self.web_api.set_mobile_schedule_enabled(account_id, enabled)
+                await self.async_request_refresh()
+                return
+            except Exception as err:  # noqa: BLE001 - fall back to the web path
+                _LOGGER.warning("Mobile schedule on/off failed, trying web: %s", err)
         if enabled:
             # Re-enable limits: restore the saved schedule (same path as unlock).
             await self.async_unlock_account(
