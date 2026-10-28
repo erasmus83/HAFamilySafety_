@@ -7,13 +7,10 @@
         "data": {
           "update_interval": "Aktualisierungsintervall (Sekunden)",
           "platforms": "Überwachte Plattformen",
-          "auth_url": "URL des Legacy-Auth-Add-ons (optional)",
-          "api_key": "API-Schlüssel des Legacy-Add-ons (optional)",
-          "allow_insecure_http_auth": "Unsichere lokale HTTP-Anmeldung erlauben (nur zum Testen)",
-          "xbox_features": "Xbox-Funktionen"
+          "allow_insecure_http_auth": "Unsichere lokale HTTP-Anmeldung erlauben (nur zum Testen)"
         },
         "data_description": {
-          "xbox_features": "Xbox-Spielzeit und Xbox-Sperre. Sie benötigen die Microsoft-Websitzung, die manche Konten alle 24 Stunden mit einer Anmeldung erneuern müssen. Deaktivieren, wenn die Kinder keine Xbox haben: Die Integration nutzt dann nur das mobile Token."
+          "platforms": "Windows, Xbox, Mobile: ein Sperrschalter pro ausgewählter Plattform. Xbox aktiviert außerdem die Xbox-Spielzeit und die Xbox-Sperre, die die Microsoft-Websitzung benötigen (manche Konten müssen sie alle 24 Stunden mit einer Anmeldung erneuern). Xbox nicht auswählen, wenn die Kinder keine Xbox haben: Die Integration nutzt dann nur das mobile Token, mit einer kürzeren Anmeldung."
         }
       },
       "auth": {
@@ -90,13 +87,10 @@
         "data": {
           "update_interval": "Aktualisierungsintervall (Sekunden)",
           "platforms": "Überwachte Plattformen",
-          "auth_url": "URL des Legacy-Auth-Add-ons (optional)",
-          "api_key": "API-Schlüssel des Legacy-Add-ons (optional)",
-          "allow_insecure_http_auth": "Unsichere lokale HTTP-Anmeldung erlauben (nur zum Testen)",
-          "xbox_features": "Xbox-Funktionen"
+          "allow_insecure_http_auth": "Unsichere lokale HTTP-Anmeldung erlauben (nur zum Testen)"
         },
         "data_description": {
-          "xbox_features": "Xbox-Spielzeit und Xbox-Sperre. Sie benötigen die Microsoft-Websitzung, die manche Konten alle 24 Stunden mit einer Anmeldung erneuern müssen. Deaktivieren, wenn die Kinder keine Xbox haben: Die Integration nutzt dann nur das mobile Token."
+          "platforms": "Windows, Xbox, Mobile: ein Sperrschalter pro ausgewählter Plattform. Xbox aktiviert außerdem die Xbox-Spielzeit und die Xbox-Sperre, die die Microsoft-Websitzung benötigen (manche Konten müssen sie alle 24 Stunden mit einer Anmeldung erneuern). Xbox nicht auswählen, wenn die Kinder keine Xbox haben: Die Integration nutzt dann nur das mobile Token, mit einer kürzeren Anmeldung."
         }
       }
     }

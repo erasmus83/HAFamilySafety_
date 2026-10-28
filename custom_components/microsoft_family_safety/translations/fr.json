@@ -7,13 +7,10 @@
         "data": {
           "update_interval": "Intervalle de mise à jour (secondes)",
           "platforms": "Plateformes surveillées",
-          "auth_url": "URL de l'add-on d'authentification (optionnel, mode legacy)",
-          "api_key": "Clé API de l'add-on (optionnel, mode legacy)",
-          "allow_insecure_http_auth": "Autoriser l'authentification HTTP locale non sécurisée (tests uniquement)",
-          "xbox_features": "Fonctions Xbox"
+          "allow_insecure_http_auth": "Autoriser l'authentification HTTP locale non sécurisée (tests uniquement)"
         },
         "data_description": {
-          "xbox_features": "Temps de jeu Xbox et verrou Xbox. Elles nécessitent la session web Microsoft, que certains comptes doivent renouveler par une connexion toutes les 24 heures. Décochez si vos enfants n'ont pas de Xbox : l'intégration fonctionne alors uniquement avec le jeton mobile."
+          "platforms": "Windows, Xbox, Mobile : un interrupteur de verrouillage par plateforme cochée. Cocher Xbox active aussi le temps de jeu et le verrou Xbox, qui nécessitent la session web Microsoft (certains comptes doivent la renouveler par une connexion toutes les 24 heures). Laissez Xbox décoché si vos enfants n'ont pas de Xbox : l'intégration fonctionne alors uniquement avec le jeton mobile, avec une connexion plus courte."
         }
       },
       "auth": {
@@ -90,13 +87,10 @@
         "data": {
           "update_interval": "Intervalle de mise à jour (secondes)",
           "platforms": "Plateformes surveillées",
-          "auth_url": "URL de l'add-on d'authentification (optionnel, mode legacy)",
-          "api_key": "Clé API de l'add-on (optionnel, mode legacy)",
-          "allow_insecure_http_auth": "Autoriser l'authentification HTTP locale non sécurisée (tests uniquement)",
-          "xbox_features": "Fonctions Xbox"
+          "allow_insecure_http_auth": "Autoriser l'authentification HTTP locale non sécurisée (tests uniquement)"
         },
         "data_description": {
-          "xbox_features": "Temps de jeu Xbox et verrou Xbox. Elles nécessitent la session web Microsoft, que certains comptes doivent renouveler par une connexion toutes les 24 heures. Décochez si vos enfants n'ont pas de Xbox : l'intégration fonctionne alors uniquement avec le jeton mobile."
+          "platforms": "Windows, Xbox, Mobile : un interrupteur de verrouillage par plateforme cochée. Cocher Xbox active aussi le temps de jeu et le verrou Xbox, qui nécessitent la session web Microsoft (certains comptes doivent la renouveler par une connexion toutes les 24 heures). Laissez Xbox décoché si vos enfants n'ont pas de Xbox : l'intégration fonctionne alors uniquement avec le jeton mobile, avec une connexion plus courte."
         }
       }
     }
