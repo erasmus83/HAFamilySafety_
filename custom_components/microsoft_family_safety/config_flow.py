@@ -18,6 +18,8 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.network import NoURLAvailableError, get_url
 
 from .const import (
+    CONF_XBOX_FEATURES,
+    DEFAULT_XBOX_FEATURES,
     AVAILABLE_PLATFORMS,
     CONF_ALLOW_INSECURE_HTTP_AUTH,
     CONF_API_KEY,
@@ -223,6 +225,10 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     default=values.get(CONF_PLATFORMS, DEFAULT_PLATFORMS),
                 ): cv.multi_select({p: p for p in AVAILABLE_PLATFORMS}),
                 vol.Optional(
+                    CONF_XBOX_FEATURES,
+                    default=values.get(CONF_XBOX_FEATURES, DEFAULT_XBOX_FEATURES),
+                ): cv.boolean,
+                vol.Optional(
                     CONF_ALLOW_INSECURE_HTTP_AUTH,
                     default=values.get(CONF_ALLOW_INSECURE_HTTP_AUTH, False),
                 ): cv.boolean,
@@ -245,6 +251,9 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL
                 ),
                 CONF_PLATFORMS: user_input.get(CONF_PLATFORMS, DEFAULT_PLATFORMS),
+                CONF_XBOX_FEATURES: bool(
+                    user_input.get(CONF_XBOX_FEATURES, DEFAULT_XBOX_FEATURES)
+                ),
                 CONF_ALLOW_INSECURE_HTTP_AUTH: self._allow_insecure_http_auth,
             }
             self._pending_auth_url = user_input.get(CONF_AUTH_URL, "").strip() or None
@@ -267,7 +276,11 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # A native entry is only complete when both mobile OAuth and the
                 # account.microsoft.com web session can be captured. Keep manual
                 # mobile OAuth only for explicitly configured legacy add-on users.
-                if self._detected_source in ("api", "file") or self._pending_auth_url:
+                if (
+                    self._detected_source in ("api", "file")
+                    or self._pending_auth_url
+                    or self._mobile_only()
+                ):
                     return await self.async_step_auth()
                 errors["base"] = "native_https_required"
                 return self.async_show_form(
@@ -323,7 +336,7 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         callback_url = str(
             hass_url.with_path(AUTH_CALLBACK_PATH).with_query({"flow_id": self.flow_id})
         )
-        if self._uses_legacy_addon():
+        if self._uses_legacy_addon() or self._mobile_only():
             self._mobile_proxy = MicrosoftFamilyAuthProxy(
                 self.hass,
                 callback_url=callback_url,
@@ -332,7 +345,10 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             register_native_proxy(self.hass, self._mobile_proxy)
             proxy_url = str(hass_url.with_path(self._mobile_proxy.access_path))
-            _LOGGER.debug("Starting native Microsoft Family mobile OAuth proxy (legacy add-on entry)")
+            _LOGGER.debug(
+                "Starting native Microsoft Family mobile OAuth proxy "
+                "(legacy add-on entry or Xbox features off)"
+            )
             return self.async_external_step(step_id="check_mobile_proxy", url=proxy_url)
 
         resume_cookies = self._interrupt_resume_cookies()
@@ -381,6 +397,20 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "the sign-in from the stored session so the page can be confirmed"
         )
         return cookies
+
+    def _mobile_only(self) -> bool:
+        """Return whether this flow signs in for the mobile API only.
+
+        True when "Xbox features" is off: everything except the Xbox usage
+        report and the Xbox lock runs on the mobile refresh token, so the
+        account.microsoft.com web sign-in, its Family bootstrap and its
+        cookies are skipped entirely.
+        """
+        if self._is_existing_entry_auth_flow():
+            options = self._get_existing_entry().options
+        else:
+            options = self._pending_options or {}
+        return not options.get(CONF_XBOX_FEATURES, DEFAULT_XBOX_FEATURES)
 
     def _uses_legacy_addon(self) -> bool:
         """Return whether this flow serves a Playwright add-on entry.
@@ -467,7 +497,7 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Preserve the legacy add-on flow unchanged.  The native flow below is
         # deliberately restricted to entries that need a Family web session.
-        if self._uses_legacy_addon():
+        if self._uses_legacy_addon() or self._mobile_only():
             return self.async_external_step_done(next_step_id="finish_mobile_proxy")
 
         redirect_url = proxy.oauth_redirect_url
@@ -729,8 +759,13 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             new_user_id = str(info.get("user_id") or "")
             if old_user_id and new_user_id and old_user_id != new_user_id:
                 return self.async_abort(reason="wrong_account")
-            # Existing entries always renew the web session natively (#49).
             self._prepare_existing_entry_update(entry, refresh_token, new_user_id)
+            if self._mobile_only():
+                # No web session: drop any stored browser credentials too.
+                assert self._pending_data is not None
+                self._pending_data[CONF_WEB_COOKIES] = None
+                return await self.async_step_reauth_success(user_input={})
+            # Existing entries always renew the web session natively (#49).
             return await self.async_step_start_web_auth()
 
         user_id = str(info.get("user_id") or "")
@@ -748,8 +783,9 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._pending_data = data
         self._pending_title = info["title"]
 
-        # An add-on URL typed by the user keeps the legacy journey.
-        if self._uses_legacy_addon():
+        # An add-on URL typed by the user keeps the legacy journey; an entry
+        # with Xbox features off needs nothing beyond the mobile token.
+        if self._uses_legacy_addon() or self._mobile_only():
             return self.async_create_entry(
                 title=self._pending_title,
                 data=data,
@@ -1256,7 +1292,9 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     await self.async_set_unique_id(refresh_token[:20])
                     self._abort_if_unique_id_configured()
                     data: dict[str, Any] = {CONF_REFRESH_TOKEN: refresh_token}
-                    if self._pending_auth_url or self._detected_url:
+                    if not self._mobile_only() and (
+                        self._pending_auth_url or self._detected_url
+                    ):
                         data[CONF_AUTH_URL] = self._pending_auth_url or self._detected_url
                     if self._pending_api_key:
                         data[CONF_API_KEY] = self._pending_api_key
@@ -1385,6 +1423,9 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
         current_allow_insecure_http_auth = self._config_entry.options.get(
             CONF_ALLOW_INSECURE_HTTP_AUTH, False
         )
+        current_xbox_features = self._config_entry.options.get(
+            CONF_XBOX_FEATURES, DEFAULT_XBOX_FEATURES
+        )
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
@@ -1399,6 +1440,10 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
                     ): cv.multi_select(
                         {p: p for p in AVAILABLE_PLATFORMS}
                     ),
+                    vol.Optional(
+                        CONF_XBOX_FEATURES,
+                        default=current_xbox_features,
+                    ): cv.boolean,
                     vol.Optional(
                         CONF_ALLOW_INSECURE_HTTP_AUTH,
                         default=current_allow_insecure_http_auth,

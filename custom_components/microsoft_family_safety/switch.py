@@ -67,6 +67,10 @@ async def async_setup_entry(
 
             # Create per-platform lock switches only for selected platforms
             enabled_platforms = entry.options.get(CONF_PLATFORMS, DEFAULT_PLATFORMS)
+            if not coordinator.xbox_features:
+                enabled_platforms = [
+                    p for p in enabled_platforms if str(p).lower() != "xbox"
+                ]
             for platform in enabled_platforms:
                 entities.append(
                     FamilySafetyPlatformLockSwitch(
@@ -89,11 +93,12 @@ async def async_setup_entry(
             )
 
             # Xbox schedule on/off (the console's own limits, PerDeviceType).
-            entities.append(
-                FamilySafetyXboxScheduleSwitch(
-                    coordinator, entry, account_id, account_name,
+            if coordinator.xbox_features:
+                entities.append(
+                    FamilySafetyXboxScheduleSwitch(
+                        coordinator, entry, account_id, account_name,
+                    )
                 )
-            )
 
             # Per-child "App, feature, and game limits" switch: per-app limits
             # are only enforced while it is on.

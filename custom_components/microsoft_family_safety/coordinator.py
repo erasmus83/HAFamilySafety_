@@ -27,6 +27,8 @@ from ._pyfamilysafety_compat import apply_patches, is_stale_roster_error
 from .api_client import FamilySafetyWebAPI
 from .auth.addon_client import AddonCookieClient
 from .const import (
+    CONF_XBOX_FEATURES,
+    DEFAULT_XBOX_FEATURES,
     CONF_API_KEY,
     CONF_AUTH_URL,
     CONF_REFRESH_TOKEN,
@@ -170,7 +172,12 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._addon_client = AddonCookieClient(
             hass, auth_url=auth_url, api_key=api_key
         )
-        self._native_web_auth = bool(entry.data.get(CONF_WEB_COOKIES))
+        #: Xbox features off: the entry runs on the mobile token only and
+        #: never touches the Family web session or the legacy add-on.
+        self._mobile_only = not entry.options.get(
+            CONF_XBOX_FEATURES, DEFAULT_XBOX_FEATURES
+        )
+        self._has_web_credentials = bool(entry.data.get(CONF_WEB_COOKIES))
         self._web_cookies_loaded = False
         self._auth_notification_sent = False
         self._roster_notification_sent = False
@@ -179,6 +186,16 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         #: was read, or a web lock/unlock from here succeeded. Until then the
         #: Xbox lock switch reports unknown rather than "unlocked".
         self._xbox_lock_known: set[str] = set()
+
+    @property
+    def _native_web_auth(self) -> bool:
+        """True when the entry holds its own Family web session (native mode)."""
+        return self._has_web_credentials and not self._mobile_only
+
+    @property
+    def xbox_features(self) -> bool:
+        """Whether Xbox entities (and the web session they need) are wanted."""
+        return not self._mobile_only
 
     def _entry_auth_anchor(self) -> str:
         """Fingerprint the base browser/mobile login stored in the config entry.
@@ -227,7 +244,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             self._runtime_auth_state = {}
         runtime_cookies = self._runtime_auth_state.get(CONF_WEB_COOKIES)
-        self._native_web_auth = bool(
+        self._has_web_credentials = bool(
             runtime_cookies or self.entry.data.get(CONF_WEB_COOKIES)
         )
 
@@ -293,7 +310,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         self._runtime_auth_state = next_state
         await self._auth_store.async_save(next_state)
-        self._native_web_auth = bool(
+        self._has_web_credentials = bool(
             next_state.get(CONF_WEB_COOKIES) or self.entry.data.get(CONF_WEB_COOKIES)
         )
         _LOGGER.debug("Persisted rotated Microsoft Family Safety credentials")
@@ -377,6 +394,8 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_load_web_cookies(self) -> None:
         """Prefer cookies captured natively; retain the Playwright add-on fallback."""
+        if self._mobile_only:
+            return
         try:
             cookies: list[dict[str, Any]] | None = None
             if self._native_web_auth:
@@ -764,7 +783,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         policy belonging to a different child, and silently accepting it would
         save the wrong schedule (issue #23).
         """
-        if self._native_web_auth:
+        if self._native_web_auth or self._mobile_only:
             if self.web_api is None:
                 return None
             return await self.web_api.get_screentime_policy(
@@ -787,7 +806,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             except Exception as err:  # noqa: BLE001 - fall back to the web path
                 _LOGGER.warning("Mobile screen-time allowance update failed, trying web: %s", err)
-        if self._native_web_auth:
+        if self._native_web_auth or self._mobile_only:
             if self.web_api is None:
                 raise RuntimeError("Web API not initialized")
             return await self.web_api.set_screentime_allowance(
@@ -807,7 +826,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             except Exception as err:  # noqa: BLE001 - fall back to the web path
                 _LOGGER.warning("Mobile screen-time interval update failed, trying web: %s", err)
-        if self._native_web_auth:
+        if self._native_web_auth or self._mobile_only:
             if self.web_api is None:
                 raise RuntimeError("Web API not initialized")
             return await self.web_api.set_screentime_intervals(
@@ -1284,6 +1303,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         family_ok = family_state in ("ready", "unknown")
         web_ok = web_authenticated is True and family_ok
         state = "connected" if mobile_ok and web_ok else "degraded" if mobile_ok else "disconnected"
+        if self._mobile_only:
+            # No web session by design: the mobile API alone decides.
+            state = "connected" if mobile_ok else "disconnected"
         reauth_recommended = bool(
             self._native_web_auth
             and (
@@ -1340,6 +1362,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
             "cookies_loaded": self._web_cookies_loaded,
             "native_web_auth": self._native_web_auth,
+            "xbox_features": not self._mobile_only,
             "runtime_credentials_persisted": bool(self._runtime_auth_state),
             "reauth_requested": self._reauth_requested,
             "reauth_required": self._reauth_requested,
@@ -1377,7 +1400,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             screentime = await self._fetch_screentime_policy(account_id)
             expired = (
-                self.web_api.web_session_state == "expired"
+                False
+                if self._mobile_only
+                else self.web_api.web_session_state == "expired"
                 if self._native_web_auth
                 else self._addon_client.last_error_code == "LOGIN_REDIRECT"
             )
@@ -1412,6 +1437,8 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Microsoft account session is authenticated; keeping reauth disabled "
                 "and treating this as Family API context/authentication failure"
             )
+        if self._mobile_only:
+            return result
         try:
             result["xbox_screentime_policy"] = (
                 await self.web_api.get_mobile_xbox_screentime_policy(account_id)

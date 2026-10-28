@@ -72,7 +72,8 @@ async def async_setup_entry(
             # "Xbox Screen Time Limits" switch, or the Family Safety app).
             xbox = (account_data or {}).get("xbox_screentime_policy")
             if (
-                account_id not in known_xbox_accounts
+                coordinator.xbox_features
+                and account_id not in known_xbox_accounts
                 and isinstance(xbox, dict)
                 and xbox.get("isEnabled")
             ):

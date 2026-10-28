@@ -9,7 +9,11 @@
           "platforms": "Monitored platforms",
           "auth_url": "Legacy auth add-on URL (optional)",
           "api_key": "Legacy add-on API key (optional)",
-          "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)"
+          "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)",
+          "xbox_features": "Xbox features"
+        },
+        "data_description": {
+          "xbox_features": "Xbox play time and the Xbox lock. They need the Microsoft web session, which some accounts must renew with a sign-in every 24 hours. Untick if the children have no Xbox: the integration then runs on the mobile token only."
         }
       },
       "auth": {
@@ -88,7 +92,11 @@
           "platforms": "Monitored platforms",
           "auth_url": "Legacy auth add-on URL (optional)",
           "api_key": "Legacy add-on API key (optional)",
-          "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)"
+          "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)",
+          "xbox_features": "Xbox features"
+        },
+        "data_description": {
+          "xbox_features": "Xbox play time and the Xbox lock. They need the Microsoft web session, which some accounts must renew with a sign-in every 24 hours. Untick if the children have no Xbox: the integration then runs on the mobile token only."
         }
       }
     }

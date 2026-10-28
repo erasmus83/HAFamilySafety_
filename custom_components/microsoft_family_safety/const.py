@@ -26,6 +26,12 @@ DEFAULT_TIMEOUT: Final = 30
 CONF_PLATFORMS: Final = "platforms"
 AVAILABLE_PLATFORMS: Final = ["Windows", "Xbox", "Mobile"]
 DEFAULT_PLATFORMS: Final = ["Windows"]
+# Xbox usage and the Xbox lock still need the Family web session, which some
+# accounts must renew with an interactive sign-in every 24 h (#52). Off = the
+# entry runs on the mobile refresh token only: no web sign-in, no stored
+# browser cookies, no Xbox entities.
+CONF_XBOX_FEATURES: Final = "xbox_features"
+DEFAULT_XBOX_FEATURES: Final = True
 
 # Days of week, in Microsoft API order (index 0 = Sunday)
 DAY_KEYS: Final = [

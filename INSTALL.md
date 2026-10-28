@@ -98,11 +98,22 @@ The first dialog asks for:
 |-------|---------|-------|
 | Update interval (seconds) | 300 | 30 -- 3600 |
 | Monitored platforms | Windows | Windows / Xbox / Mobile |
+| Xbox features | on | Xbox play time and the Xbox lock. Untick if the children have no Xbox, see [below](#xbox-features) |
 | Allow insecure local HTTP authentication (testing only) | off | See [below](#insecure-local-http) |
 | Legacy auth add-on URL (optional) | *(empty)* | Only for [legacy mode](#legacy-add-on-mode) |
 | Legacy add-on API key (optional) | *(empty)* | Only for legacy mode |
 
 Leave the two legacy fields empty unless you deliberately want add-on mode. Click **Submit**.
+
+<a id="xbox-features"></a>
+#### Xbox features
+
+Xbox play time and the Xbox lock are the only features that still need the Microsoft **web session**, and Microsoft makes some accounts renew it with a sign-in every 24 hours. Everything else (schedules, account lock, app limits, websites, age rating, requests, Xbox daily limits) runs on the mobile token, like the Family Safety app.
+
+- **Ticked** (default): the sign-in below captures the web session and the mobile token.
+- **Unticked**: the sign-in is the short one of the Family Safety app, only the mobile token is stored, and no Xbox entities are created. You will not be asked to sign in again unless the mobile token itself expires.
+
+You can change it later under **Configure**. Ticking it again starts a reauthentication to capture the web session.
 
 ### Step 3 -- Sign In to Microsoft
 
@@ -110,13 +121,13 @@ Home Assistant shows an **Open website** button.
 
 1. Click it. A browser window opens on the Microsoft sign-in page, served through a temporary authentication proxy that Home Assistant mounts inside its own HTTP server.
 2. Sign in with your **parent/organizer** Microsoft account (not a child account) and complete MFA if prompted.
-3. When Microsoft asks **"Stay signed in?"**, answer **Yes**. This is what makes the session last for about a year; without it Microsoft drops it after about 7 hours and you will be asked to sign in again.
+3. With Xbox features ticked, answer **Yes** when Microsoft asks **"Stay signed in?"**. Without it Microsoft drops the web session after a few hours. With Xbox features unticked the question does not matter: the window finishes as soon as Microsoft hands back the token, and you can skip Step 4.
 
 You do **not** copy an authorization URL and you do **not** paste a redirect URL back.
 
 ### Step 4 -- Let Home Assistant Finish
 
-**Keep the browser window open, and be patient.** After the visible sign-in finishes, the same tab is redirected a few times so the Family dashboard session can be established, and Home Assistant switches to a waiting screen. It then fetches the mobile token itself, server-side, from that same sign-in: Microsoft answers with a single redirect, so there is no second sign-in page. Only if Microsoft ever demands another interactive step does that part fall back to your browser.
+**Keep the browser window open, and be patient.** (Xbox features ticked only.) After the visible sign-in finishes, the same tab is redirected a few times so the Family dashboard session can be established, and Home Assistant switches to a waiting screen. It then fetches the mobile token itself, server-side, from that same sign-in: Microsoft answers with a single redirect, so there is no second sign-in page. Only if Microsoft ever demands another interactive step does that part fall back to your browser.
 
 > **This step is not instant.** The waiting screen can sit for **up to about a minute** before Home Assistant reports success, and the sign-in dialog does not update continuously while it works. This is normal. Do not press *Open website* again, do not close the dialog, and do not assume it has failed. Wait for it to switch to the completion screen on its own.
 
@@ -158,7 +169,7 @@ While enabled, your Microsoft password and session data travel **unencrypted acr
 
 If you already run the Playwright auth add-on (or the standalone Docker container) and prefer to keep it, set the **Legacy auth add-on URL** field during setup. Screen time reads and writes are then routed through the add-on's browser session, exactly as before. Since 2.0.8 a running add-on is no longer auto-selected, and reauthenticating a legacy entry from Home Assistant moves it to the native sign-in for good.
 
-An entry runs in native mode as soon as it has a natively captured web session, and in legacy mode otherwise. The two modes are mutually exclusive per config entry.
+An entry runs in native mode as soon as it has a natively captured web session, and in legacy mode otherwise. The two modes are mutually exclusive per config entry. An entry with **Xbox features** unticked is neither: it uses only the mobile token and never the add-on.
 
 ---
 
@@ -166,7 +177,7 @@ An entry runs in native mode as soon as it has a natively captured web session, 
 
 1. Go to **Settings > Devices & Services** and click on **Microsoft Family Safety**.
 2. Confirm devices and entities have been created.
-3. Check the **Connection** diagnostic sensor. It should read `connected`. `degraded` means the mobile API works but the Family web session does not -- screen time schedules will show as `unknown`; if it persists, `reauth_recommended` turns `true` and a reauthentication prompt is raised for you.
+3. Check the **Connection** diagnostic sensor. It should read `connected`, with `screentime_policy_source: mobile_v4`. `degraded` means the mobile API works but the Family web session does not: only the Xbox play time and the Xbox lock are affected. With Xbox features unticked the web session is not used and the sensor shows `xbox_features: false`.
 4. Go to **Settings > Devices & Services > Entities** and search for your child's name. You should see sensors, switches, buttons, 7 number entities (daily limits) and 14 time entities (7 start + 7 end).
 5. If entities show "unavailable," wait up to one update interval (default 5 minutes) for the first data pull.
 
@@ -223,11 +234,13 @@ Official "NGINX Home Assistant SSL proxy" add-on: in the add-on configuration, e
 
 ### Session Expired / Reauthentication Required
 
-The account page session lapses about once a day; since 2.0.6 the integration completes Microsoft's silent sign-in by itself, so no action is needed while the "Stay signed in?" cookies are valid. When the Microsoft login itself is gone, Home Assistant raises a reauthentication prompt and a persistent notification. This also happens when Microsoft has dropped the Family session while the account page still answers: after two consecutive updates in that state, the **Connection** sensor reports `degraded` with `reauth_recommended: true` and the flow is started automatically.
+Since 2.0.20 the schedules and every other non-Xbox feature run on the mobile token, so a dead web session no longer asks you to sign in by itself; it only stops the Xbox play time and the Xbox lock. With Xbox features unticked, only an expired mobile token can bring you here.
+
+For the web session (Xbox features ticked): the account page session lapses about once a day; since 2.0.6 the integration completes Microsoft's silent sign-in by itself, so no action is needed while the "Stay signed in?" cookies are valid. When the Microsoft login itself is gone, Home Assistant raises a reauthentication prompt and a persistent notification. This also happens when Microsoft has dropped the Family session while the account page still answers: after two consecutive updates in that state, the **Connection** sensor reports `degraded` with `reauth_recommended: true` and the flow is started automatically.
 
 1. Go to **Settings > Devices & Services**.
 2. Find **Microsoft Family Safety** -- it shows a **Reauthenticate** button. You can also call the `microsoft_family_safety.request_reauth` service to start the flow without waiting, for example from a dashboard button.
-3. Follow the same sign-in steps and answer **Yes** to "Stay signed in?". Both the Family web session and the mobile refresh token are renewed.
+3. Follow the same sign-in steps (answer **Yes** to "Stay signed in?" with Xbox features ticked). The mobile refresh token is renewed, and the Family web session too when Xbox features are ticked.
 
 ### Dashboard card
 
