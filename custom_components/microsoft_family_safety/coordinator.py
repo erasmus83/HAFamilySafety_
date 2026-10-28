@@ -866,6 +866,13 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self.web_api:
             raise RuntimeError("Web API not initialized")
         await self.web_api.set_app_limits_enabled(child_id, enabled)
+        # Microsoft accepted it: show the new state now. The refresh below is
+        # debounced, and until it runs the switch would fall back to the value
+        # of the previous poll.
+        account = ((self.data or {}).get("accounts") or {}).get(child_id)
+        if isinstance(account, dict):
+            account["app_limits_enabled"] = bool(enabled)
+            self.async_update_listeners()
         await self.async_request_refresh()
 
     async def async_block_website(self, child_id: str, website: str) -> None:
