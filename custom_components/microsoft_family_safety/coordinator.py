@@ -780,6 +780,13 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _set_screentime_allowance(
         self, child_id: str, day_of_week: int, hours: int, minutes: int
     ) -> bool:
+        if self.web_api is not None:
+            try:
+                return await self.web_api.set_mobile_screentime_allowance(
+                    child_id, day_of_week, hours, minutes
+                )
+            except Exception as err:  # noqa: BLE001 - fall back to the web path
+                _LOGGER.warning("Mobile screen-time allowance update failed, trying web: %s", err)
         if self._native_web_auth:
             if self.web_api is None:
                 raise RuntimeError("Web API not initialized")
@@ -793,6 +800,13 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _set_screentime_intervals(
         self, child_id: str, day_of_week: int, allowed_intervals: list[bool]
     ) -> bool:
+        if self.web_api is not None:
+            try:
+                return await self.web_api.set_mobile_screentime_intervals(
+                    child_id, day_of_week, allowed_intervals
+                )
+            except Exception as err:  # noqa: BLE001 - fall back to the web path
+                _LOGGER.warning("Mobile screen-time interval update failed, trying web: %s", err)
         if self._native_web_auth:
             if self.web_api is None:
                 raise RuntimeError("Web API not initialized")
@@ -1139,6 +1153,8 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         policy = (account or {}).get("screentime_policy")
         if not isinstance(policy, dict):
             return None
+        if policy.get("isEnabled") is False:
+            return False
         daily = policy.get("dailyRestrictions") or policy.get("DailyRestrictions")
         if not isinstance(daily, dict):
             return None
@@ -1150,6 +1166,17 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return False
 
     async def async_set_policy_enabled(self, account_id: str, enabled: bool) -> None:
+        # The app's weekly switch is the schedule's own "enabled" flag: Microsoft
+        # keeps every day as it is. The 24 h rewrite below is the web fallback,
+        # and a restore point it left behind is still restored on enable.
+        has_saved = self._policy_key(account_id) in self._saved_screentime
+        if self.web_api is not None and not (enabled and has_saved):
+            try:
+                await self.web_api.set_mobile_schedule_enabled(account_id, enabled)
+                await self.async_request_refresh()
+                return
+            except Exception as err:  # noqa: BLE001 - fall back to the web path
+                _LOGGER.warning("Mobile schedule on/off failed, trying web: %s", err)
         if enabled:
             # Re-enable limits: restore the saved schedule (same path as unlock).
             await self.async_unlock_account(
@@ -1395,6 +1422,15 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         self._family_auth_required_polls += 1
         if not self._family_context_dead_end:
+            return
+        if getattr(self.web_api, "mobile_schedule_ok", False):
+            # Schedules run on the mobile API; the expired web context only
+            # affects web-only extras, so a daily reauth prompt is not worth it.
+            if self._family_auth_required_polls == _FAMILY_AUTH_REQUIRED_POLLS:
+                _LOGGER.info(
+                    "Family web context needs an interactive sign-in; schedules keep "
+                    "working through the mobile API, so no reauthentication is requested"
+                )
             return
         await self._create_auth_notification()
         self._request_reauth("family_context_auth_required")

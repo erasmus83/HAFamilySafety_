@@ -542,9 +542,19 @@ def _patch_combined_client_data_sources() -> bool:
         self, child_id: str, platform: str = "Windows",
         *, require_child_match: bool = False,
     ):
-        """Read the active Windows/per-device policy exactly as seen in the HAR."""
+        """Read the Windows policy: mobile API first, Family web /st as fallback."""
         self.screentime_policy_status = "checking"
         self.screentime_policy_source = None
+
+        try:
+            policy = await self.get_mobile_screentime_policy(child_id, platform)
+        except Exception as err:  # noqa: BLE001 - fall back to the web path
+            _LOGGER.debug("Mobile screen-time schedule read failed: %r", err)
+            policy = None
+        if policy is not None:
+            self.screentime_policy_status = "ok"
+            self.screentime_policy_source = "mobile_v4"
+            return policy
 
         now = time.monotonic()
         backoff_until = float(getattr(self, "_family_web_backoff_until", 0.0) or 0.0)
