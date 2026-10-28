@@ -626,6 +626,21 @@ class FamilySafetyWebAPI:
             _LOGGER.debug("Microsoft account session check failed: %r", err)
             return None
 
+    def _drop_family_context(self) -> None:
+        """Forget a Family context that an isolated request found rejected.
+
+        Isolated requests (the Xbox endpoints) leave the session state alone so
+        that a child without an Xbox cannot break it. A 401 or a login redirect
+        is different: the Family session itself is gone. Since #64 nothing else
+        uses that session on every poll, so without this the context stayed
+        "ready" and the Xbox features stopped with the entry still "connected".
+        The coordinator re-warms the context on the next poll.
+        """
+        if self.family_context_state == "ready":
+            self.family_context_state = "auth_required"
+            self.family_token_source = None
+        self._web_csrf = None
+
     def _note_account_interrupt(self, page: str) -> None:
         """Record an interactive step Microsoft put in front of the silent sign-in.
 
@@ -1142,6 +1157,13 @@ class FamilySafetyWebAPI:
                 if resp.status in (200, 201, 204):
                     _set_error(None)
                     mark_session("authenticated", resp.status)
+                    if isolated:
+                        # Fork 2.0.22.2: a 2xx from a Family endpoint proves the
+                        # session, isolated or not. Since #64 the Xbox calls are
+                        # the only Family requests, and the /account probe is
+                        # deferred while the context is ready, so without this
+                        # the session stayed "unknown" and the entry "degraded".
+                        self._mark_web_session("authenticated", resp.status)
                     mark_api("ok", endpoint, resp.status)
                     text = await resp.text()
                     self.sync_web_cookies_from_session()
@@ -1164,6 +1186,8 @@ class FamilySafetyWebAPI:
                         destination = None
                     if self._is_authentication_url(destination):
                         _set_error("LOGIN_REDIRECT")
+                        if isolated:
+                            self._drop_family_context()
                         mark_session("expired", resp.status)
                         mark_api("auth_redirect", endpoint, resp.status)
                         warn(
@@ -1188,6 +1212,10 @@ class FamilySafetyWebAPI:
                 body = await resp.text()
                 if isolated:
                     _set_error(f"HTTP_{resp.status}")
+                    if resp.status == 401:
+                        # Fork 2.0.22.2: a 403/404 on an optional endpoint can
+                        # mean "no Xbox", but a 401 is the Family session itself.
+                        self._drop_family_context()
                     _LOGGER.debug(
                         "Optional Family web API endpoint answered %s: %s %s",
                         resp.status, endpoint, body[:200],
