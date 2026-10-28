@@ -254,7 +254,7 @@ For one child with no per-app switches, an account with Windows monitoring enabl
 | Platform | Count | What |
 |----------|-------|------|
 | `sensor` | 6 – 7 | Screen Time, Account Info, Applications, Pending Requests, Web Filter, Screen Time Policy (+ Balance when the account exposes one) |
-| `switch` | 2 + platforms + apps | Account Lock, Screen Time Limits, one Platform Lock per monitored platform, one per application |
+| `switch` | 3 + platforms + apps | Account Lock, Screen Time Limits, App Limits, one Platform Lock per monitored platform, one per application |
 | `button` | 2 | Approve Request, Deny Request |
 | `number` | 7 | one daily limit per day |
 | `time` | 14 | 7 start + 7 end |
@@ -296,6 +296,7 @@ A typical single-child setup with a full app list lands around 85-90 entities.
 |--------|-----------|----------|
 | **Account Lock** | `switch.{prefix}_lock` | **ON = account locked** (all screen time set to 0). Saves quotas before locking, restores on unlock. Persists across restarts. Attribute `has_saved_policy` shows whether a restore point exists. |
 | **Screen Time Limits** | `switch.{prefix}_screen_time_limits` | OFF = limits disabled (all days set to 24 h). ON = restore the saved schedule. Uses the same save/restore machinery as the lock. |
+| App Limits | `switch.{prefix}_app_limits` | The "App, feature, and game limits" toggle above the app list. While it is OFF, the per-app time limits are kept but not enforced. |
 | App Block | `switch.{prefix}_app_{appname}` | ON = app blocked. One switch per application. |
 | Platform Lock | `switch.{prefix}_{platform}_lock` | ON = platform locked. Locks one platform (e.g. Windows) through a Microsoft device override. For Windows the integration tries a web-API time override first, then falls back to the mobile API. Use **Account Lock** to lock every platform at once. |
 
