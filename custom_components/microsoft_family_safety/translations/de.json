@@ -224,7 +224,7 @@
         },
         "end_hour": {
           "name": "Endstunde",
-          "description": "Ende des erlaubten Zeitfensters (0-23)."
+          "description": "Ende des erlaubten Zeitfensters (0-24, 24 = Mitternacht)."
         },
         "end_minute": {
           "name": "Endminute",

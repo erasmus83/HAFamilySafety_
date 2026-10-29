@@ -224,7 +224,7 @@
         },
         "end_hour": {
           "name": "Heure de fin",
-          "description": "Fin de la plage autorisée (0-23)."
+          "description": "Fin de la plage autorisée (0-24, 24 = minuit)."
         },
         "end_minute": {
           "name": "Minute de fin",

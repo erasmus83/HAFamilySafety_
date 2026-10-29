@@ -224,7 +224,7 @@
         },
         "end_hour": {
           "name": "End Hour",
-          "description": "End of allowed window (0-23)."
+          "description": "End of allowed window (0-24, 24 = midnight)."
         },
         "end_minute": {
           "name": "End Minute",

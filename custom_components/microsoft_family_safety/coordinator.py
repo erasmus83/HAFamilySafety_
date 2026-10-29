@@ -844,6 +844,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if hours < 0 or minutes < 0 or minutes > 59 or hours * 60 + minutes > 1440:
             raise ValueError("screen-time allowance must be between 0 and 24 hours")
         await self._set_screentime_allowance(child_id, day_of_week, hours, minutes)
+        self._update_cached_day(
+            child_id, day_of_week, allowance=f"{hours:02d}:{minutes:02d}:00"
+        )
         await self.async_request_refresh()
 
     async def async_set_screentime_intervals(
@@ -861,12 +864,41 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         end_total = end_hour * 60 + end_minute
         if not 0 <= start_total < end_total <= 1440:
             raise ValueError("screen-time interval end must be later than start")
-        await self._set_screentime_intervals(
-            child_id,
-            day_of_week,
-            _range_to_slots(start_hour, start_minute, end_hour, end_minute),
-        )
+        slots = _range_to_slots(start_hour, start_minute, end_hour, end_minute)
+        await self._set_screentime_intervals(child_id, day_of_week, slots)
+        self._update_cached_day(child_id, day_of_week, slots=slots)
         await self.async_request_refresh()
+
+    def _update_cached_day(
+        self,
+        child_id: str,
+        day_of_week: int,
+        *,
+        allowance: str | None = None,
+        slots: list[bool] | None = None,
+    ) -> None:
+        """Mirror a write Microsoft accepted into the cached schedule.
+
+        The refresh requested after a write is debounced. Until it runs, the
+        number and time entities read the previous poll: setting a day's end
+        right after its start would send the old start back to Microsoft and
+        undo the first write (seen with a script setting both in a row).
+        """
+        account = ((self.data or {}).get("accounts") or {}).get(child_id)
+        policy = account.get("screentime_policy") if isinstance(account, dict) else None
+        daily = policy.get("dailyRestrictions") if isinstance(policy, dict) else None
+        if not isinstance(daily, dict):
+            return
+        day = daily.get(DAY_KEYS[day_of_week])
+        if not isinstance(day, dict):
+            return
+        if allowance is not None:
+            day["allowance"] = allowance
+        if slots is not None:
+            day["timeline"] = list(slots)
+            day["allowedIntervals"] = list(slots)
+            day.pop("allottedIntervals", None)
+        self.async_update_listeners()
 
     async def async_set_app_time_limit(
         self,

@@ -92,7 +92,8 @@ SERVICE_SET_SCREENTIME_INTERVALS_SCHEMA = vol.Schema({
     vol.Required("day_of_week"): vol.All(vol.Coerce(int), vol.Range(min=0, max=6)),
     vol.Required("start_hour"): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
     vol.Optional("start_minute", default=0): vol.In([0, 30]),
-    vol.Required("end_hour"): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
+    # 24 = midnight at the end of the day (with end_minute 0).
+    vol.Required("end_hour"): vol.All(vol.Coerce(int), vol.Range(min=0, max=24)),
     vol.Optional("end_minute", default=0): vol.In([0, 30]),
 })
 

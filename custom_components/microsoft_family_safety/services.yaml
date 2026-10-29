@@ -195,12 +195,12 @@ set_screentime_intervals:
           step: 30
     end_hour:
       name: End Hour
-      description: End of allowed window (0-23).
+      description: End of allowed window (0-24, 24 = midnight).
       required: true
       selector:
         number:
           min: 0
-          max: 23
+          max: 24
           step: 1
     end_minute:
       name: End Minute
