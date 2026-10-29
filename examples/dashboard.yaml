@@ -120,8 +120,7 @@ decluttering_templates:
                   action: more-info
                 custom_fields:
                   h: '[[[ const c = states[''sensor.microsoft_family_safety_connection'']; if (!c) return ''''; const a = c.attributes || {}; const fam = a.family_context; const reauth = a.reauth_required;
-                    let color = ''#4CAF50''; let label = ''OK''; if (reauth) { color = ''#F44336''; label = ''Reauthentication required''; } else if (c.state !== ''connected'' || (fam && fam !== ''ready'')) {
-                    color = ''#FF9800''; label = ''Session needs renewal''; } return `<span style="display:inline-flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block"></span><span
+                    let color = ''#4CAF50''; let label = ''OK''; if (reauth) { color = ''#F44336''; label = ''Reauthentication required''; } else if (c.state !== ''connected'') { color = ''#FF9800''; label = c.state === ''degraded'' ? ''Xbox session needs renewal'' : ''Disconnected''; } return `<span style="display:inline-flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block"></span><span
                     style="font-size:11px;opacity:0.7">${label}</span></span>`; ]]]'
                 styles:
                   card:
