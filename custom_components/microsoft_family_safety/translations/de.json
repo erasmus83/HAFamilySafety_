@@ -40,7 +40,8 @@
         "description": "Melde dich mit dem Microsoft-Konto an, das die Familie verwaltet, und antworte mit **Ja**, wenn Microsoft „Angemeldet bleiben?“ fragt. Lass das geöffnete Anmeldefenster offen: Nach der sichtbaren Anmeldung wechselt Home Assistant zu einer Warteanzeige, während die Family-Sitzung und das mobile Token eingerichtet werden."
       },
       "check_proxy": {
-        "title": "Microsoft Family-Websitzung"
+        "title": "Microsoft Family-Websitzung",
+        "description": "**Melde dich im gerade geöffneten Fenster an**, mit dem Microsoft-Konto, das die Familie verwaltet, und antworte bei „Angemeldet bleiben?“ mit **Ja**.\n\nKomm dann hierher zurück und **warte**: Dieser Dialog läuft von selbst weiter, was nach der Anmeldung bis zu etwa einer Minute dauern kann. Klicke nicht erneut auf *Website öffnen*, außer das Microsoft-Fenster hat sich nie geöffnet oder wurde vor der Anmeldung geschlossen."
       },
       "auth_success": {
         "title": "Microsoft Family Safety-Anmeldung abgeschlossen",
@@ -71,12 +72,6 @@
     },
     "progress": {
       "family_sso": "Die Microsoft-Anmeldung ist abgeschlossen. Home Assistant schließt die Family-Sitzung im offenen Fenster ab und holt das mobile Token. Das kann bis zu etwa 60 Sekunden dauern. Lass das Microsoft-Fenster offen; es ist nichts weiter zu tun."
-    },
-    "check_mobile_proxy": {
-      "description": "**Melde dich im gerade geöffneten Fenster an**, mit dem Microsoft-Konto, das die Familie verwaltet, und antworte bei „Angemeldet bleiben?“ mit **Ja**.\n\nKomm dann hierher zurück und **warte**: Dieser Dialog läuft von selbst weiter, was nach der Anmeldung bis zu etwa einer Minute dauern kann. Klicke nicht erneut auf *Website öffnen*, außer das Microsoft-Fenster hat sich nie geöffnet oder wurde vor der Anmeldung geschlossen."
-    },
-    "check_proxy": {
-      "description": "**Melde dich im gerade geöffneten Fenster an**, mit dem Microsoft-Konto, das die Familie verwaltet, und antworte bei „Angemeldet bleiben?“ mit **Ja**.\n\nKomm dann hierher zurück und **warte**: Dieser Dialog läuft von selbst weiter, was nach der Anmeldung bis zu etwa einer Minute dauern kann. Klicke nicht erneut auf *Website öffnen*, außer das Microsoft-Fenster hat sich nie geöffnet oder wurde vor der Anmeldung geschlossen."
     }
   },
   "options": {
@@ -87,10 +82,12 @@
         "data": {
           "update_interval": "Aktualisierungsintervall (Sekunden)",
           "platforms": "Überwachte Plattformen",
-          "allow_insecure_http_auth": "Unsichere lokale HTTP-Anmeldung erlauben (nur zum Testen)"
+          "allow_insecure_http_auth": "Unsichere lokale HTTP-Anmeldung erlauben (nur zum Testen)",
+          "allowed_users": "Benutzer, die Microsoft Family Safety steuern dürfen"
         },
         "data_description": {
-          "platforms": "Windows, Xbox, Mobile: ein Sperrschalter pro ausgewählter Plattform. Xbox aktiviert außerdem die Xbox-Spielzeit und die Xbox-Sperre, die die Microsoft-Websitzung benötigen (manche Konten müssen sie alle 24 Stunden mit einer Anmeldung erneuern). Xbox nicht auswählen, wenn die Kinder keine Xbox haben: Die Integration nutzt dann nur das mobile Token, mit einer kürzeren Anmeldung."
+          "platforms": "Windows, Xbox, Mobile: ein Sperrschalter pro ausgewählter Plattform. Xbox aktiviert außerdem die Xbox-Spielzeit und die Xbox-Sperre, die die Microsoft-Websitzung benötigen (manche Konten müssen sie alle 24 Stunden mit einer Anmeldung erneuern). Xbox nicht auswählen, wenn die Kinder keine Xbox haben: Die Integration nutzt dann nur das mobile Token, mit einer kürzeren Anmeldung.",
+          "allowed_users": "Leer lassen, damit alle Benutzer die Schalter und Einstellungen verwenden können (Standard). Sobald Benutzer ausgewählt sind, dürfen nur sie und die Administratoren das: Das Nicht-Administrator-Konto eines Kindes wird bei jeder Taste, jedem Schalter, jedem Limit und jedem Zeitfenster sowie bei den microsoft_family_safety-Aktionen abgewiesen. Automatisierungen und Skripte, die Home Assistant ausführt, sind nicht betroffen. Gib dem Kind ein Nicht-Administrator-Konto: Ein Administrator kann diese Option ändern."
         }
       }
     }
@@ -224,7 +221,7 @@
         },
         "end_hour": {
           "name": "Endstunde",
-          "description": "Ende des erlaubten Zeitfensters (0-23)."
+          "description": "Ende des erlaubten Zeitfensters (0-24, 24 = Mitternacht)."
         },
         "end_minute": {
           "name": "Endminute",

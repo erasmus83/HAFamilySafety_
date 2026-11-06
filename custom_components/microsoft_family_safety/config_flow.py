@@ -16,8 +16,17 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.network import NoURLAvailableError, get_url
+from homeassistant.helpers.selector import (
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 
+from ._httpx_web_adapter import apply_httpx_web_transport_patch
+from ._httpx_web_tuning import apply_httpx_web_tuning_patch
 from .const import (
+    CONF_ALLOWED_USERS,
     CONF_XBOX_FEATURES,
     DEFAULT_XBOX_FEATURES,
     AVAILABLE_PLATFORMS,
@@ -91,6 +100,38 @@ async def validate_redirect_url(hass: HomeAssistant, redirect_url: str) -> dict[
     except Exception as err:
         _LOGGER.error("Authentication validation failed: %s", err)
         raise InvalidAuth(f"Cannot connect: {err}") from err
+
+
+async def _allowed_users_selector(
+    hass: HomeAssistant, current: list[str] | None
+) -> tuple[SelectSelector, list[str]]:
+    """Selector of the people of this Home Assistant, and the saved choice still valid.
+
+    System accounts (Supervisor, add-ons, cloud) and deactivated users are left
+    out. The saved list is filtered on the users that still exist, otherwise
+    the selector refuses an id that was deleted and the form cannot be saved.
+    """
+    users = [
+        u for u in await hass.auth.async_get_users()
+        if not u.system_generated and u.is_active
+    ]
+    options = [
+        SelectOptionDict(
+            value=u.id,
+            label=f"{u.name} (administrator)" if u.is_admin else (u.name or u.id),
+        )
+        for u in sorted(users, key=lambda u: (u.name or "").lower())
+    ]
+    known = {u.id for u in users}
+    selected = [user_id for user_id in (current or []) if user_id in known]
+    return (
+        SelectSelector(
+            SelectSelectorConfig(
+                options=options, multiple=True, mode=SelectSelectorMode.LIST
+            )
+        ),
+        selected,
+    )
 
 
 def _wants_xbox(platforms: Any) -> bool:
@@ -824,6 +865,11 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.debug("Server-side Family bootstrap unavailable: %s", err)
             return None
 
+        # On a first install no entry is loaded yet, so the transport patches
+        # of async_setup_entry have not run: without them this bootstrap would
+        # go through plain aiohttp with a 15 s timeout and no browser hints.
+        apply_httpx_web_transport_patch(self.hass)
+        apply_httpx_web_tuning_patch()
         web_api = FamilySafetyWebAPI(None)
         web_api.set_web_cookies(cookies)
         try:
@@ -1225,12 +1271,16 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "Microsoft Family Safety sign-in completed for an already configured "
             "account; updating and reloading the existing entry"
         )
-        return self.async_update_reload_and_abort(
+        # The update listener only reloads on an options change; new credentials
+        # need one too, and core no longer lets the helper do it for us (2026.12).
+        result = self.async_update_and_abort(
             entry,
             data_updates=updates,
             options=self._pending_options or entry.options,
             reason="reauth_successful",
         )
+        self.hass.config_entries.async_schedule_reload(entry.entry_id)
+        return result
 
     async def async_step_reauth_success(
         self, user_input: dict[str, Any] | None = None
@@ -1264,20 +1314,26 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "Microsoft Family Safety reconfiguration completed; "
                 "updating and reloading config entry"
             )
-            return self.async_update_reload_and_abort(
+            result = self.async_update_and_abort(
                 entry,
                 data_updates=updates,
                 options=self._pending_options or entry.options,
             )
+            self.hass.config_entries.async_schedule_reload(entry.entry_id)
+            return result
 
         _LOGGER.info(
-            "Microsoft Family Safety reauthentication completed; updating config entry"
+            "Microsoft Family Safety reauthentication completed; updating and reloading config entry"
         )
-        return self.async_update_and_abort(
+        # Same reload as above: a coordinator loaded without web credentials (Xbox
+        # just ticked) would otherwise never see them and ask to sign in again.
+        result = self.async_update_and_abort(
             entry,
             data_updates=updates,
             options=self._pending_options or entry.options,
         )
+        self.hass.config_entries.async_schedule_reload(entry.entry_id)
+        return result
 
     async def async_step_auth(
         self, user_input: dict[str, Any] | None = None
@@ -1426,6 +1482,9 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
             CONF_XBOX_FEATURES, DEFAULT_XBOX_FEATURES
         ) and not _wants_xbox(current_platforms):
             current_platforms = [*current_platforms, "Xbox"]
+        users_selector, current_allowed = await _allowed_users_selector(
+            self.hass, self._config_entry.options.get(CONF_ALLOWED_USERS)
+        )
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
@@ -1440,6 +1499,10 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
                     ): cv.multi_select(
                         {p: p for p in AVAILABLE_PLATFORMS}
                     ),
+                    vol.Optional(
+                        CONF_ALLOWED_USERS,
+                        default=current_allowed,
+                    ): users_selector,
                     vol.Optional(
                         CONF_ALLOW_INSECURE_HTTP_AUTH,
                         default=current_allow_insecure_http_auth,

@@ -40,7 +40,8 @@
         "description": "Connectez-vous avec le compte Microsoft qui gère la famille, et répondez **Oui** quand Microsoft demande « Rester connecté ? ». Laissez la fenêtre d'authentification ouverte : une fois la connexion visible terminée, Home Assistant passe sur un écran d'attente pendant que la session Family et le jeton mobile sont établis."
       },
       "check_proxy": {
-        "title": "Session web Microsoft Family"
+        "title": "Session web Microsoft Family",
+        "description": "**Connectez-vous dans la fenêtre qui vient de s'ouvrir**, avec le compte Microsoft qui gère la famille, et répondez **Oui** à « Rester connecté ? ».\n\nRevenez ensuite ici et **patientez** : cette fenêtre continue toute seule, ce qui peut prendre jusqu'à une minute environ après la connexion. Ne cliquez pas à nouveau sur *Ouvrir le site*, sauf si la fenêtre Microsoft ne s'est jamais ouverte ou a été fermée avant la connexion."
       },
       "auth_success": {
         "title": "Connexion Microsoft Family Safety terminée",
@@ -71,12 +72,6 @@
     },
     "progress": {
       "family_sso": "La connexion Microsoft est terminée. Home Assistant finalise la session Family dans la fenêtre ouverte et récupère le jeton mobile. Cela peut prendre jusqu'à 60 secondes environ. Laissez la fenêtre Microsoft ouverte ; aucune action n'est requise."
-    },
-    "check_mobile_proxy": {
-      "description": "**Connectez-vous dans la fenêtre qui vient de s'ouvrir**, avec le compte Microsoft qui gère la famille, et répondez **Oui** à « Rester connecté ? ».\n\nRevenez ensuite ici et **patientez** : cette fenêtre continue toute seule, ce qui peut prendre jusqu'à une minute environ après la connexion. Ne cliquez pas à nouveau sur *Ouvrir le site*, sauf si la fenêtre Microsoft ne s'est jamais ouverte ou a été fermée avant la connexion."
-    },
-    "check_proxy": {
-      "description": "**Connectez-vous dans la fenêtre qui vient de s'ouvrir**, avec le compte Microsoft qui gère la famille, et répondez **Oui** à « Rester connecté ? ».\n\nRevenez ensuite ici et **patientez** : cette fenêtre continue toute seule, ce qui peut prendre jusqu'à une minute environ après la connexion. Ne cliquez pas à nouveau sur *Ouvrir le site*, sauf si la fenêtre Microsoft ne s'est jamais ouverte ou a été fermée avant la connexion."
     }
   },
   "options": {
@@ -87,10 +82,12 @@
         "data": {
           "update_interval": "Intervalle de mise à jour (secondes)",
           "platforms": "Plateformes surveillées",
-          "allow_insecure_http_auth": "Autoriser l'authentification HTTP locale non sécurisée (tests uniquement)"
+          "allow_insecure_http_auth": "Autoriser l'authentification HTTP locale non sécurisée (tests uniquement)",
+          "allowed_users": "Utilisateurs autorisés à piloter Microsoft Family Safety"
         },
         "data_description": {
-          "platforms": "Windows, Xbox, Mobile : un interrupteur de verrouillage par plateforme cochée. Cocher Xbox active aussi le temps de jeu et le verrou Xbox, qui nécessitent la session web Microsoft (certains comptes doivent la renouveler par une connexion toutes les 24 heures). Laissez Xbox décoché si vos enfants n'ont pas de Xbox : l'intégration fonctionne alors uniquement avec le jeton mobile, avec une connexion plus courte."
+          "platforms": "Windows, Xbox, Mobile : un interrupteur de verrouillage par plateforme cochée. Cocher Xbox active aussi le temps de jeu et le verrou Xbox, qui nécessitent la session web Microsoft (certains comptes doivent la renouveler par une connexion toutes les 24 heures). Laissez Xbox décoché si vos enfants n'ont pas de Xbox : l'intégration fonctionne alors uniquement avec le jeton mobile, avec une connexion plus courte.",
+          "allowed_users": "Laisser vide pour que tous les utilisateurs puissent utiliser les boutons et réglages (par défaut). Dès que des utilisateurs sont cochés, seuls eux et les administrateurs le peuvent : le compte non administrateur d'un enfant est refusé sur chaque bouton, interrupteur, limite et horaire, et sur les actions microsoft_family_safety. Les automatisations et scripts lancés par Home Assistant ne sont pas concernés. Donnez à l'enfant un compte non administrateur : un administrateur peut modifier cette option."
         }
       }
     }
@@ -224,7 +221,7 @@
         },
         "end_hour": {
           "name": "Heure de fin",
-          "description": "Fin de la plage autorisée (0-23)."
+          "description": "Fin de la plage autorisée (0-24, 24 = minuit)."
         },
         "end_minute": {
           "name": "Minute de fin",

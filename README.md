@@ -1,7 +1,7 @@
 # <img src="https://raw.githubusercontent.com/noiwid/HAFamilySafety/main/custom_components/microsoft_family_safety/brand/icon.png" alt="Microsoft Family Safety" width="30" > Microsoft Family Safety for Home Assistant
 
 [![GitHub Release][releases-shield]][releases]
-[![HACS][hacs-shield]][hacs]
+[![Marketplace][marketplace-shield]][marketplace]
 [![License][license-shield]][license]
 [![Buy Me A Beer](https://img.shields.io/badge/Buy%20me%20a%20beer-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/noiwid)
 
@@ -14,6 +14,12 @@ Authentication is **native**: you sign in to Microsoft from Home Assistant itsel
 > **Domain:** `microsoft_family_safety` | **IoT Class:** Cloud Polling | **Languages:** English, French, German
 
 ![Dashboard Example](https://raw.githubusercontent.com/noiwid/HAFamilySafety/main/examples/dashboard.png)
+
+⭐ **Enjoying this integration?** [Star it on GitHub](https://github.com/noiwid/HAFamilySafety): it gives the project visibility and helps other parents discover it.
+
+## Also supervising Android devices?
+
+[Google Family Link for Home Assistant](https://github.com/noiwid/HAFamilyLink) is the companion integration for Android phones and tablets. With both installed, all of your child's screen time can be followed in one place, in Home Assistant. This also makes a time budget shared across devices possible, something Google and Microsoft cannot do across each other's devices. It is not built in: an automation adds up `sensor.{prefix}_screen_time` and `sensor.<child>_daily_screen_time`, then locks the devices once the budget is spent.
 
 ---
 
@@ -141,14 +147,11 @@ Legacy and native mode are mutually exclusive per config entry; there is no auto
 
 ### Step 1 — Install the Integration
 
-#### Via HACS (Recommended)
+#### Via the Marketplace (Recommended)
 
-1. Open **HACS** in Home Assistant
-2. Go to **Integrations** and click the three-dot menu in the top right
-3. Select **Custom repositories**
-4. Add `https://github.com/noiwid/HAFamilySafety` with category **Integration**
-5. Search for **Microsoft Family Safety** in HACS and click **Download**
-6. Restart Home Assistant
+1. Go to **Settings > Marketplace > Browse**
+2. Search for **Microsoft Family Safety** and install it
+3. Restart Home Assistant
 
 #### Manual Installation
 
@@ -177,7 +180,20 @@ Legacy and native mode are mutually exclusive per config entry; there is no auto
 |--------|----------------|---------|-------|
 | Update interval (seconds) | 30 – 3600 | 300 (5 min) | |
 | Monitored platforms | Windows / Xbox / Mobile | Windows | One lock switch per platform. Xbox also decides whether the web session is used, see [below](#xbox-and-the-web-session) |
+| Users allowed to control Microsoft Family Safety | list of Home Assistant users | *(empty: everybody)* | See [Who can control the integration](#who-can-control-the-integration) |
 | Allow insecure local HTTP authentication (testing only) | on / off | off | See below |
+
+#### Who can control the integration
+
+Home Assistant lets every user press any button, flip any switch or change any number, unless an entity permission policy says otherwise, and Home Assistant has no screen to write such policies. If your child has a Home Assistant account, they could otherwise lift their own limits from the integration's entities.
+
+The option **Users allowed to control Microsoft Family Safety** closes that gap:
+
+- **Empty** (default): nothing changes, every user can use the buttons and settings.
+- **Some users ticked**: only they and the administrators can. Any other account is refused, with a warning in the log, on every button, switch, daily limit and time window of the integration, and on every `microsoft_family_safety.*` action.
+- Automations and scripts started by Home Assistant itself are never affected. A script started by a person from the dashboard runs with that person's rights.
+
+Give the child a **non-administrator** account and tick the parents: an administrator can change this option, so a child with an administrator account bypasses it. The child still sees the entities (Home Assistant cannot hide them per user) but can no longer use them. Changing the option takes effect immediately, without reloading the integration.
 
 #### Xbox and the web session
 
@@ -612,7 +628,7 @@ Two files:
 - [`examples/family-safety-card.yaml`](examples/family-safety-card.yaml) — the `fs_child` template only.
 - [`examples/dashboard.yaml`](examples/dashboard.yaml) — a full example view instantiating it with placeholder entities.
 
-**Required HACS frontend cards:** `decluttering-card`, `button-card`, `vertical-stack-in-card`, `card-mod`, `mushroom`
+**Required Marketplace dashboard cards:** `decluttering-card`, `button-card`, `vertical-stack-in-card`, `card-mod`, `mushroom`
 
 Paste the `decluttering_templates:` block into your dashboard (a dashboard has exactly one such key — merge, do not duplicate), then add one `custom:decluttering-card` per child, filling `child`, `lock` and `title`. Entity IDs carry the device-name prefix; look them up under **Settings → Devices & Services → Entities**. See the comments at the top of each file.
 
@@ -626,13 +642,17 @@ To add more children, add one `custom:decluttering-card` block per child in the 
 
 Home Assistant's built-in `security_filter` middleware rejects URLs whose query string looks like a file-injection attempt, using the pattern `[a-zA-Z0-9_]=/([a-z0-9_.]//?)+`. Some of Microsoft's silent-SSO redirects carry parameters such as `epctrc=/w/...`, which match that pattern, and the request is refused before the integration ever sees it.
 
-The integration ships a **narrowly scoped workaround**: for the authentication proxy routes only (`/auth/microsoft_family_safety/proxy/*`), the security filter reports no match, so those requests get through. Every other endpoint keeps the filter unchanged.
+The integration carries such a query in an encoded form on its way through Home Assistant and restores it before it reaches Microsoft. The filter itself is not changed.
 
-This problem is **intermittent** — it depends on which OAuth path Microsoft chooses for a given sign-in. If you still hit a 400 during authentication, retry the flow; check the Home Assistant log for `security_filter` entries, and open an issue with the (redacted) URL.
+If you still hit a 400 during authentication, retry the flow; check the Home Assistant log for `security_filter` entries, and open an issue with the (redacted) URL.
+
+### Microsoft asks "Work or school account" or "Personal account"
+
+This page appears when the same address exists as both kinds of Microsoft account, sometimes again after you have signed in. Pick **Personal account**: Family Safety only works with it. The setup then continues on its own.
 
 ### "Microsoft authentication host not allowed"
 
-Microsoft's sign-in page links some of its own pages with an explicit port (`login.microsoftonline.com:443`), and versions before 2.0.4 rejected that host. Update to 2.0.4 or later; the port is ignored now. If you still see it, the host in the address bar after `__ms_host__/` is outside `live.com`, `microsoft.com` and `microsoftonline.com`, which the proxy deliberately refuses.
+Microsoft's sign-in page links some of its own pages with an explicit port (`login.microsoftonline.com:443`), and versions before 2.0.4 rejected that host. Update to 2.0.4 or later; the port is ignored now. If you still see it, the host in the address bar after `__ms_host__/` is not one of the sign-in hosts (`account.microsoft.com`, `account.live.com`, `login.live.com`, `login.microsoft.com`, `login.microsoftonline.com`), which the proxy deliberately refuses. Please open an issue with that host name.
 
 ### Sign-in never finishes / stuck on the waiting screen
 
@@ -676,7 +696,7 @@ Your Home Assistant URL is not HTTPS. Either configure HTTPS (recommended), or e
 ### Account Lock issues
 
 - **Lock refuses to run** with *"current schedule unreadable and no saved policy exists"* — this is the safety guard from issue #23. It prevents wiping a child's real schedule when the current one cannot be read and there is nothing to restore from. The message tells you which case you are in: an expired session (re-authenticate), or a timeout / network error / active backoff (retry in a few minutes).
-- **Unlock refuses to run** with *"no saved schedule to restore"* — the restore point is gone, typically because `.storage/microsoft_family_safety.saved_screentime` was deleted. The integration will not invent a schedule; set the daily limits again from Home Assistant or at [account.microsoft.com/family](https://account.microsoft.com/family). Before 2.0.3 it wrote a 2 h/day, 07:00-22:00 default here, which silently replaced the real schedule.
+- **Unlock refuses to run** with *"no saved schedule to restore"* — the restore point is gone, typically because `.storage/microsoft_family_safety.saved_screentime.<entry_id>` was deleted. The integration will not invent a schedule; set the daily limits again from Home Assistant or at [account.microsoft.com/family](https://account.microsoft.com/family). Before 2.0.3 it wrote a 2 h/day, 07:00-22:00 default here, which silently replaced the real schedule.
 - **Lock is account-wide** — it affects all platforms simultaneously.
 - Lock and unlock **stop at the first network failure** rather than waiting out a timeout for each of the seven days, and keep the saved schedule so the operation can be retried.
 
@@ -712,10 +732,9 @@ Useful markers: `family_token_present`, `exported_cookies`, `bootstrap_attempts`
 Native authentication trades some of the add-on's isolation for simplicity. Be aware of the following before enabling it:
 
 - **Credentials are stored in clear text.** Microsoft session cookies, the Family antiforgery token and the OAuth refresh token are persisted in the config entry and in `.storage/` **unencrypted**. The legacy add-on encrypted its cookie file with Fernet; the native path does not. Anyone with read access to your Home Assistant configuration directory (including backups) can extract a usable Microsoft session. Protect and encrypt your backups accordingly.
-- **The authentication proxy endpoint is unauthenticated.** `/auth/microsoft_family_safety/proxy/{token}` and its callback are registered without Home Assistant authentication — the only protection is a 24-byte random token in the URL. The flow is scoped: the proxy only forwards to `live.com`, `microsoft.com` and `microsoftonline.com`, it exists for at most **10 minutes**, and it is destroyed when the flow finishes. Still, while a flow is live, anyone who can reach your Home Assistant HTTP interface **and** guess the token would be proxied to Microsoft.
+- **The authentication proxy endpoint is unauthenticated.** `/auth/microsoft_family_safety/proxy/{token}` and its callback are registered without Home Assistant authentication — the only protection is a 24-byte random token in the URL. The flow is scoped: the proxy only serves the Microsoft sign-in hosts (`account.microsoft.com`, `account.live.com`, `login.live.com`, `login.microsoft.com`, `login.microsoftonline.com`), the callback only accepts that token for its own flow, it exists for at most **10 minutes**, and it is destroyed when the flow finishes. Still, while a flow is live, anyone who can reach your Home Assistant HTTP interface **and** guess the token would be proxied to Microsoft.
 - **The Microsoft login page is served from your Home Assistant origin.** Because the sign-in is proxied, the address bar shows your Home Assistant URL rather than `login.live.com`, so you cannot verify the Microsoft certificate visually. Only start the flow from Home Assistant itself.
 - **HTTP mode is genuinely insecure.** With `allow_insecure_http_auth` enabled, your Microsoft password crosses the local network unencrypted. It is restricted to local/private addresses and logs a warning, but it remains a testing option, not a deployment mode.
-- **The security filter workaround.** The bypass is scoped to the proxy routes and leaves the filter in place for every other request. It is nonetheless a modification of Home Assistant's request handling — see [Troubleshooting](#the-sign-in-window-shows-400-bad-request).
 
 ### Limitations
 
@@ -823,7 +842,7 @@ Registered by the integration only while a sign-in flow is running, and destroye
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| any | `/auth/microsoft_family_safety/proxy/{token}[/{path}]` | Reverse proxy to Microsoft sign-in (restricted to `live.com`, `microsoft.com`, `microsoftonline.com`) |
+| any | `/auth/microsoft_family_safety/proxy/{token}[/{path}]` | Reverse proxy to Microsoft sign-in (restricted to `account.microsoft.com`, `account.live.com`, `login.live.com`, `login.microsoft.com`, `login.microsoftonline.com`) |
 | GET | `/auth/microsoft_family_safety/callback?flow_id=` | Hands the captured result back to the config flow |
 
 ### Addon API — `http://{addon-hostname}:8098` *(legacy mode only)*
@@ -902,5 +921,5 @@ When reporting an issue, please include: HA version, integration version, whethe
 [releases]: https://github.com/noiwid/HAFamilySafety/releases
 [license-shield]: https://img.shields.io/github/license/noiwid/HAFamilySafety.svg?style=for-the-badge
 [license]: LICENSE
-[hacs-shield]: https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge
-[hacs]: https://github.com/hacs/integration
+[marketplace-shield]: https://img.shields.io/badge/Marketplace-Default-41BDF5.svg?style=for-the-badge
+[marketplace]: https://my.home-assistant.io/redirect/hacs_repository/?owner=noiwid&repository=HAFamilySafety&category=integration

@@ -40,7 +40,8 @@
         "description": "Sign in with the Microsoft account that manages the family, and answer **Yes** when Microsoft asks \"Stay signed in?\". Keep the opened authentication window open: after the visible sign-in completes, Home Assistant switches to a waiting screen while the Family session and the mobile token are established."
       },
       "check_proxy": {
-        "title": "Microsoft Family web session"
+        "title": "Microsoft Family web session",
+        "description": "**Sign in in the window that just opened**, with the Microsoft account that manages the family, and answer **Yes** to \"Stay signed in?\".\n\nThen come back here and **wait**: this dialog continues on its own, which can take up to about a minute after the sign-in. Do not press *Open website* again unless the Microsoft window never opened or was closed before you signed in."
       },
       "auth_success": {
         "title": "Microsoft Family Safety sign-in completed",
@@ -71,12 +72,6 @@
     },
     "progress": {
       "family_sso": "Microsoft sign-in is complete. Home Assistant is finishing the Family session in the open authentication window and fetching the mobile token. This can take up to about 60 seconds. Keep the Microsoft window open; no action is required."
-    },
-    "check_mobile_proxy": {
-      "description": "**Sign in in the window that just opened**, with the Microsoft account that manages the family, and answer **Yes** to \"Stay signed in?\".\n\nThen come back here and **wait**: this dialog continues on its own, which can take up to about a minute after the sign-in. Do not press *Open website* again unless the Microsoft window never opened or was closed before you signed in."
-    },
-    "check_proxy": {
-      "description": "**Sign in in the window that just opened**, with the Microsoft account that manages the family, and answer **Yes** to \"Stay signed in?\".\n\nThen come back here and **wait**: this dialog continues on its own, which can take up to about a minute after the sign-in. Do not press *Open website* again unless the Microsoft window never opened or was closed before you signed in."
     }
   },
   "options": {
@@ -87,10 +82,12 @@
         "data": {
           "update_interval": "Update interval (seconds)",
           "platforms": "Monitored platforms",
-          "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)"
+          "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)",
+          "allowed_users": "Users allowed to control Microsoft Family Safety"
         },
         "data_description": {
-          "platforms": "Windows, Xbox, Mobile: one lock switch per ticked platform. Ticking Xbox also turns on Xbox play time and the Xbox lock, which need the Microsoft web session (some accounts must renew it with a sign-in every 24 hours). Leave Xbox unticked if the children have no Xbox: the integration then runs on the mobile token only, with a shorter sign-in."
+          "platforms": "Windows, Xbox, Mobile: one lock switch per ticked platform. Ticking Xbox also turns on Xbox play time and the Xbox lock, which need the Microsoft web session (some accounts must renew it with a sign-in every 24 hours). Leave Xbox unticked if the children have no Xbox: the integration then runs on the mobile token only, with a shorter sign-in.",
+          "allowed_users": "Leave empty to let every user use the buttons and settings (default). As soon as users are ticked, only they and the administrators can: a child's non-administrator account is refused on every button, switch, limit and time window, and on the microsoft_family_safety actions. Automations and scripts run by Home Assistant are not affected. Give the child a non-administrator account: an administrator can change this option."
         }
       }
     }
@@ -224,7 +221,7 @@
         },
         "end_hour": {
           "name": "End Hour",
-          "description": "End of allowed window (0-23)."
+          "description": "End of allowed window (0-24, 24 = midnight)."
         },
         "end_minute": {
           "name": "End Minute",
