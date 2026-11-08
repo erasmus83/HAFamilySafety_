@@ -1069,8 +1069,15 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """xuid for a write, or None when xapprove is not in use for this child."""
         if not self._xapprove_active:
             return None
-        account = self._accounts.get(str(child_id))
+        # Roster ids are int, entity and service ids may be str: compare as str.
+        account = next(
+            (a for key, a in self._accounts.items() if str(key) == str(child_id)), None
+        )
         if account is None:
+            _LOGGER.warning(
+                "Xbox Family Settings: no roster account %s; using the previous path",
+                child_id,
+            )
             return None
         try:
             return await self._async_xbox_xuid(account)

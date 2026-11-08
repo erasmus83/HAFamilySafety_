@@ -243,6 +243,14 @@ async def test_xbox_limit_writes_go_to_xapprove(coordinator):
     coordinator.web_api.set_mobile_xbox_screentime_allowance.assert_not_called()
 
 
+@pytest.mark.parametrize("passed_id", [CHILD, int(CHILD)])
+async def test_writes_find_the_child_whatever_the_id_type(coordinator, passed_id):
+    # The roster keys accounts by int user_id; entities and services pass either.
+    coordinator._accounts = {int(CHILD): coordinator._accounts[CHILD]}
+    await coordinator.async_set_xbox_screentime_limit(passed_id, 0, 0, 30)
+    coordinator.xbox_family.async_set_day.assert_awaited_once_with(XUID, 0, minutes=30)
+
+
 async def test_xbox_lock_through_xapprove(coordinator):
     coordinator.xbox_family.async_create_override.return_value = {
         "overrides": [{"overrideType": 2, "validUntil": "2099-01-01T00:00:00Z"}]
