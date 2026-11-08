@@ -1550,7 +1550,10 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="xbox_link",
             data_schema=vol.Schema({vol.Required("redirect_url"): str}),
-            description_placeholders={"url": self._xbox_link_url},
+            description_placeholders={
+                "url": self._xbox_link_url,
+                "redirect_prefix": "https://login.live.com/oauth20_desktop.srf?code=",
+            },
             errors=errors,
         )
 

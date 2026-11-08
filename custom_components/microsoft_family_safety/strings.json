@@ -94,7 +94,7 @@
       },
       "xbox_link": {
         "title": "Link Xbox Family Settings",
-        "description": "1. Open [this Microsoft sign-in]({url}) and sign in with the parent account you use in the Xbox Family Settings app.\n2. You end up on a blank page whose address starts with `https://login.live.com/oauth20_desktop.srf?code=`. Copy that whole address and paste it below within a few minutes.",
+        "description": "1. Open [this Microsoft sign-in]({url}) and sign in with the parent account you use in the Xbox Family Settings app.\n2. You end up on a blank page whose address starts with `{redirect_prefix}`. Copy that whole address and paste it below within a few minutes.",
         "data": {
           "redirect_url": "Address of the blank page"
         }
