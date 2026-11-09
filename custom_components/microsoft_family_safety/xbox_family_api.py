@@ -223,6 +223,11 @@ class XboxFamilyAPI:
         """Linked and the last call to Microsoft worked."""
         return self.linked and self.state == "ok"
 
+    @property
+    def usable(self) -> bool:
+        """Linked and the token not refused: a transient error does not count."""
+        return self.linked and self.state != "auth_failed"
+
     async def async_load(self) -> None:
         data = await self._store.async_load() or {}
         self._refresh_token = data.get("refresh_token")

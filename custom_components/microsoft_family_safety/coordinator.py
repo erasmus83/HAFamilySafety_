@@ -17,7 +17,7 @@ from pyfamilysafety.enum import OverrideTarget, OverrideType
 from pyfamilysafety.exceptions import AggregatorException, HttpException
 from yarl import URL
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.storage import Store
@@ -1602,7 +1602,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         family_ok = family_state in ("ready", "unknown")
         web_ok = web_authenticated is True and family_ok
         state = "connected" if mobile_ok and web_ok else "degraded" if mobile_ok else "disconnected"
-        if self._mobile_only or self.xbox_family.ready:
+        if self._mobile_only or (self.xbox_features and self.xbox_family.usable):
             # No web session by design, or (fork) Xbox runs on its own sign-in:
             # the mobile API alone decides.
             state = "connected" if mobile_ok else "disconnected"
@@ -1769,6 +1769,28 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._create_auth_notification()
         self._request_reauth("manual")
 
+    async def _async_withdraw_family_reauth(self) -> None:
+        """Drop a family-context reauth that is no longer needed (fork).
+
+        Raised while Xbox still needed the web session, e.g. during a brief
+        xapprove outage; once xapprove works again the prompt, the
+        notification and the open reauth flow only ask for a needless sign-in.
+        """
+        _LOGGER.info(
+            "Xbox Family Settings works again; withdrawing the Family web reauth request"
+        )
+        self._reauth_requested = False
+        self._reauth_reason = None
+        await self._dismiss_auth_notification()
+        try:
+            for flow in self.hass.config_entries.flow.async_progress_by_handler(
+                DOMAIN,
+                match_context={"source": SOURCE_REAUTH, "entry_id": self.entry.entry_id},
+            ):
+                self.hass.config_entries.flow.async_abort(flow["flow_id"])
+        except Exception as err:  # noqa: BLE001 - the flow can still be ignored
+            _LOGGER.debug("Could not close the reauth flow: %r", err)
+
     @property
     def _family_context_dead_end(self) -> bool:
         return self._family_auth_required_polls >= _FAMILY_AUTH_REQUIRED_POLLS
@@ -1819,11 +1841,16 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Only skip the prompt when nothing needs the web
         # session. This method runs only with a native web session, which
         # means Xbox is enabled, and the Xbox usage and lock stop without it.
+        # Fork: a linked Xbox Family Settings sign-in counts until its token is
+        # refused; a one-off xapprove error (Microsoft answered 503 once on
+        # 2026-11-09) must not raise a prompt nothing can clear.
         if getattr(self.web_api, "mobile_schedule_ok", False) and (
-            not self.xbox_features or self.xbox_family.ready
+            not self.xbox_features or self.xbox_family.usable
         ):
             # Schedules run on the mobile API; the expired web context only
             # affects web-only extras, so a daily reauth prompt is not worth it.
+            if self._reauth_reason == "family_context_auth_required":
+                await self._async_withdraw_family_reauth()
             if self._family_auth_required_polls == _FAMILY_AUTH_REQUIRED_POLLS:
                 _LOGGER.info(
                     "Family web context needs an interactive sign-in; schedules keep "

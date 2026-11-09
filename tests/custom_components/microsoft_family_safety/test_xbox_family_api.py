@@ -206,7 +206,7 @@ async def coordinator(hass):
     )
     entry.add_to_hass(hass)
     coord = FamilySafetyDataUpdateCoordinator(hass, entry)
-    coord.xbox_family = MagicMock(linked=True, ready=True)
+    coord.xbox_family = MagicMock(linked=True, ready=True, usable=True)
     coord.xbox_family.async_child_xuid = AsyncMock(return_value=XUID)
     coord.xbox_family.async_get_schedule = AsyncMock(return_value=SCHEDULE)
     coord.xbox_family.async_get_overrides = AsyncMock(
@@ -272,12 +272,49 @@ async def test_xbox_unlock_falls_back_to_web_when_block_remains(coordinator):
     assert coordinator.web_api.set_platform_time_override.await_args.args[2] == "cancel"
 
 
-@pytest.mark.parametrize(("ready", "prompted"), [(True, False), (False, True)])
-async def test_no_web_reauth_prompt_while_xapprove_works(coordinator, ready, prompted):
-    coordinator.xbox_family.ready = ready
+@pytest.mark.parametrize(("usable", "prompted"), [(True, False), (False, True)])
+async def test_no_web_reauth_prompt_while_xapprove_works(coordinator, usable, prompted):
+    coordinator.xbox_family.usable = usable
     coordinator.web_api = SimpleNamespace(family_context_state="auth_required", mobile_schedule_ok=True)
     coordinator._create_auth_notification = AsyncMock()
     coordinator._request_reauth = MagicMock()
     await coordinator._async_track_family_context()
     await coordinator._async_track_family_context()
     assert coordinator._request_reauth.called is prompted
+
+
+@pytest.mark.parametrize(
+    ("state", "usable"), [("ok", True), ("linked", True), ("error", True), ("auth_failed", False)]
+)
+async def test_only_a_refused_token_makes_xapprove_unusable(hass, state, usable):
+    api = XboxFamilyAPI(hass, "entry")
+    api._refresh_token = "token"
+    api.state = state
+    assert api.usable is usable
+
+
+async def test_reauth_raised_during_a_blip_is_withdrawn(coordinator):
+    # 2026-11-09 15:53: one xapprove 503 left the prompt raised for good.
+    coordinator.web_api = SimpleNamespace(family_context_state="auth_required", mobile_schedule_ok=True)
+    coordinator._create_auth_notification = AsyncMock()
+    coordinator._dismiss_auth_notification = AsyncMock()
+    coordinator._family_auth_required_polls = 5
+    coordinator._reauth_requested = True
+    coordinator._reauth_reason = "family_context_auth_required"
+    await coordinator._async_track_family_context()
+    assert coordinator._reauth_requested is False
+    assert coordinator._reauth_reason is None
+    coordinator._dismiss_auth_notification.assert_awaited_once()
+
+
+async def test_withdraw_aborts_the_open_reauth_flow(coordinator, hass):
+    coordinator._reauth_requested = True
+    coordinator._reauth_reason = "family_context_auth_required"
+    coordinator._dismiss_auth_notification = AsyncMock()
+    progress = MagicMock(return_value=[{"flow_id": "f1"}])
+    abort = MagicMock()
+    hass.config_entries.flow.async_progress_by_handler = progress
+    hass.config_entries.flow.async_abort = abort
+    await coordinator._async_withdraw_family_reauth()
+    assert progress.call_args.kwargs["match_context"]["entry_id"] == coordinator.entry.entry_id
+    abort.assert_called_once_with("f1")
