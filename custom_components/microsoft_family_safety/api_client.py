@@ -181,6 +181,9 @@ class FamilySafetyWebAPI:
         #: Set when an isolated call found the Family session
         #: rejected, so the coordinator bootstraps again in the same poll.
         self.family_context_dropped = False
+        #: Set with family_context_dropped and kept until a new token is
+        #: captured, so the rejected token is not persisted and reloaded.
+        self.family_token_rejected = False
         #: Set once the mobile /v4 schedule API answered; schedules then no
         #: longer depend on the Family web context.
         self.mobile_schedule_ok = False
@@ -655,6 +658,7 @@ class FamilySafetyWebAPI:
         self._web_csrf = None
         # The coordinator bootstraps again in the same poll.
         self.family_context_dropped = True
+        self.family_token_rejected = True
 
     def _note_account_interrupt(self, page: str) -> None:
         """Record an interactive step Microsoft put in front of the silent sign-in.

@@ -24,7 +24,11 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from ._pyfamilysafety_compat import apply_patches, is_stale_roster_error
+from ._pyfamilysafety_compat import (
+    _WEB_BACKOFF_SECONDS,
+    apply_patches,
+    is_stale_roster_error,
+)
 from .api_client import FamilySafetyWebAPI
 from .auth.addon_client import AddonCookieClient
 from .xbox_family_api import (
@@ -319,9 +323,11 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             next_state[CONF_WEB_COOKIES] = web_cookies
         if family_token:
             next_state[CONF_WEB_FAMILY_TOKEN] = family_token
-        elif (
-            self.web_api is not None
-            and self.web_api.family_context_state == "auth_required"
+        elif self.web_api is not None and (
+            self.web_api.family_context_state == "auth_required"
+            # An Xbox 401 dropped the token; a same-poll re-warm that then
+            # timed out leaves another state, but the token is still rejected.
+            or getattr(self.web_api, "family_token_rejected", False)
         ):
             # The web API dropped its antiforgery token because Microsoft
             # rejected it. Keeping the old value here would hand it straight
@@ -336,6 +342,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             next_state[_FAMILY_TOKEN_REJECTED] = True
         if family_token:
             next_state.pop(_FAMILY_TOKEN_REJECTED, None)
+            if self.web_api is not None:
+                # A token captured after the drop is a fresh one.
+                self.web_api.family_token_rejected = False
         if family_referer:
             next_state[CONF_WEB_FAMILY_REFERER] = family_referer
         next_state["updated_at"] = dt_util.now().isoformat()
@@ -1711,7 +1720,13 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self._create_auth_notification()
                 if self._native_web_auth:
                     self._request_reauth("web_session_expired")
-            elif screentime is not None:
+            elif (
+                screentime is not None
+                and self._reauth_reason != "family_context_auth_required"
+            ):
+                # With Xbox on, a dead Family context raises its own reauth
+                # while the mobile schedule still answers; dismissing here would
+                # recreate the notification on every poll.
                 await self._dismiss_auth_notification()
             result["screentime_policy"] = screentime
         except Exception as err:
@@ -1811,10 +1826,36 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ):
             return
         self.web_api.family_context_dropped = False
+        if self._family_web_backing_off():
+            return
+        await self._async_warm_family_context_for_xbox()
+
+    def _family_web_backing_off(self) -> bool:
+        return (
+            float(getattr(self.web_api, "_family_web_backoff_until", 0.0) or 0.0)
+            > time.monotonic()
+        )
+
+    async def _async_warm_family_context_for_xbox(self) -> None:
+        """Bootstrap the Family context, backing off after a transport failure.
+
+        The /st read used to set the 30-minute backoff on a timeout, but the
+        schedules now come from the mobile API, so without this a Family outage
+        made every poll wait out the bootstrap before the mobile update.
+        """
         try:
             await self.web_api._warm_family_context()
         except Exception as err:  # noqa: BLE001 - Xbox extras only
-            _LOGGER.debug("Could not re-warm the Family web context: %r", err)
+            _LOGGER.debug("Could not warm the Family web context for Xbox: %r", err)
+            failed = True
+        else:
+            failed = self.web_api.family_context_state in ("timeout", "error", "unavailable")
+        if failed:
+            self.web_api._family_web_backoff_until = time.monotonic() + _WEB_BACKOFF_SECONDS
+            _LOGGER.debug(
+                "Family bootstrap failed (%s); no new attempt for %d s",
+                self.web_api.family_context_state, _WEB_BACKOFF_SECONDS,
+            )
 
     async def _async_track_family_context(self) -> None:
         """Escalate a Family bootstrap that keeps landing on a login page.
@@ -1958,13 +1999,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 and self.web_api is not None
                 and self.web_api.has_web_cookies
                 and self.web_api.family_context_state != "ready"
-                and float(getattr(self.web_api, "_family_web_backoff_until", 0.0) or 0.0)
-                <= time.monotonic()
+                and not self._family_web_backing_off()
             ):
-                try:
-                    await self.web_api._warm_family_context()
-                except Exception as err:  # noqa: BLE001 - Xbox extras only
-                    _LOGGER.debug("Could not warm the Family web context for Xbox: %r", err)
+                await self._async_warm_family_context_for_xbox()
             await self._async_try_silent_xbox_link()
             await self.api.update()
             if not getattr(self.api, "accounts", None):

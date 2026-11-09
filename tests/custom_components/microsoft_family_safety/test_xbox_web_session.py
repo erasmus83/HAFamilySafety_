@@ -281,3 +281,76 @@ async def test_block_until_and_unknown_types_unchanged(make_coordinator):
     block = {"screenTimeOverrideType": "BlockUntil", "validUntil": until}
     assert _lock_state(coord, block) == (True, True)
     assert _lock_state(coord, {"screenTimeOverrideType": "SomethingNew"}) == (False, False)
+
+
+# --- review follow-ups ----------------------------------------------------------
+async def test_rejection_is_persisted_when_the_rewarm_times_out(make_coordinator):
+    # An Xbox 401 drops the token; the same-poll re-warm then times out, so the
+    # state is no longer "auth_required" when the poll persists credentials.
+    coord = make_coordinator()
+    coord._auth_store = MagicMock(async_save=AsyncMock())
+    coord._runtime_auth_state = {"web_family_token": "rejected-token"}
+    api = _web_api(FakeResponse(401, body='{"statusCode":401}'))
+    await _xbox_request(api)
+
+    async def timeout():
+        api.family_context_state = "timeout"
+
+    api._warm_family_context = timeout
+    coord.web_api = api
+    await coord._async_rewarm_dropped_family_context()
+    await coord._async_persist_runtime_auth(family_token=None)
+    assert "web_family_token" not in coord._runtime_auth_state
+    assert coord._runtime_auth_state["web_family_token_rejected"] is True
+    # A token captured later is a fresh one and clears the flag.
+    await coord._async_persist_runtime_auth(family_token="fresh-token")
+    assert api.family_token_rejected is False
+    assert "web_family_token_rejected" not in coord._runtime_auth_state
+
+
+async def test_schedule_read_keeps_a_pending_family_reauth_notification(make_coordinator):
+    coord = make_coordinator()
+    coord.web_api = AsyncMock()
+    coord._fetch_screentime_policy = AsyncMock(return_value={"dailyRestrictions": {}})
+    coord._reauth_reason = "family_context_auth_required"
+    await coord._fetch_web_api_data("1")
+    coord._dismiss_auth_notification.assert_not_called()
+    coord._reauth_reason = None
+    await coord._fetch_web_api_data("1")
+    coord._dismiss_auth_notification.assert_awaited()
+
+
+@pytest.mark.parametrize("outcome", ["timeout", "error", "unavailable"])
+async def test_failed_bootstrap_backs_off_both_warm_ups(make_coordinator, outcome):
+    coord = make_coordinator()
+    calls = []
+
+    async def warm():
+        calls.append(1)
+        coord.web_api.family_context_state = outcome
+
+    coord.web_api = SimpleNamespace(
+        family_context_state="unknown",
+        has_web_cookies=True,
+        _family_web_backoff_until=0.0,
+        _warm_family_context=warm,
+        family_context_dropped=True,
+    )
+    await coord._async_warm_family_context_for_xbox()
+    assert coord.web_api._family_web_backoff_until > time.monotonic() + 60
+    # The same-poll re-warm after an Xbox 401 honours it too.
+    await coord._async_rewarm_dropped_family_context()
+    assert len(calls) == 1
+
+
+async def test_ready_bootstrap_sets_no_backoff(make_coordinator):
+    coord = make_coordinator()
+
+    async def warm():
+        coord.web_api.family_context_state = "ready"
+
+    coord.web_api = SimpleNamespace(
+        family_context_state="unknown", _family_web_backoff_until=0.0, _warm_family_context=warm
+    )
+    await coord._async_warm_family_context_for_xbox()
+    assert coord.web_api._family_web_backoff_until == 0.0
