@@ -25,6 +25,7 @@ RUN apt-get update \
         libxrandr2 \
         libgbm1 \
         libasound2 \
+        libatomic1 \
         xvfb \
         x11vnc \
         novnc \
@@ -46,8 +47,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
-# Install Playwright and its browsers
-RUN pip3 install --no-cache-dir --break-system-packages playwright && \
+# Install Playwright and its browsers. Pinned: a new release can need system
+# libraries the image lacks (1.65 needed libatomic1); bump it deliberately.
+RUN pip3 install --no-cache-dir --break-system-packages playwright==1.65.0 && \
     playwright install --with-deps chromium
 
 # Copy application code

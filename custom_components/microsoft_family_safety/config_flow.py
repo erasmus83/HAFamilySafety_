@@ -1523,7 +1523,7 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
     async def async_step_xbox_link(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Fork-only: link the Xbox Family Settings sign-in by pasting the redirect.
+        """Link the Xbox Family Settings sign-in by pasting the redirect.
 
         Same manual step as the integration's old "paste the redirect URL":
         sign in on the link, then paste the oauth20_desktop.srf address the

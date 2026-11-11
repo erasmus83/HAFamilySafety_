@@ -1,4 +1,4 @@
-"""Xbox parental controls through the Xbox Family Settings app's API (fork-only).
+"""Xbox parental controls through the Xbox Family Settings app's API.
 
 Microsoft moved the Xbox settings out of the Family Safety app into the Xbox
 Family Settings app, which talks to ``xapprove.xboxlive.com``. Its per-day

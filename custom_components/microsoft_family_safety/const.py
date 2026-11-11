@@ -31,7 +31,7 @@ DEFAULT_PLATFORMS: Final = ["Windows"]
 # entry runs on the mobile refresh token only: no web sign-in, no stored
 # browser cookies, no Xbox entities.
 CONF_XBOX_FEATURES: Final = "xbox_features"
-#: Fork-only: options-form checkbox that opens the Xbox Family Settings link step.
+#: Options-form checkbox that opens the Xbox Family Settings link step.
 CONF_XBOX_LINK: Final = "xbox_link"
 # Users allowed to control the integration (see permissions.py). Empty =
 # everybody, as before.

@@ -354,3 +354,98 @@ async def test_ready_bootstrap_sets_no_backoff(make_coordinator):
     )
     await coord._async_warm_family_context_for_xbox()
     assert coord.web_api._family_web_backoff_until == 0.0
+
+
+# --- only when Xbox depends on the web session (after #69) -----------------------
+def _link_xbox(coord, usable: bool = True) -> None:
+    coord.xbox_family = MagicMock(linked=usable, usable=usable)
+
+
+@pytest.mark.parametrize(
+    ("xbox", "linked", "mobile_ok", "needed"),
+    [
+        (True, False, True, True),  # Xbox on, no Xbox Family Settings link
+        (True, True, True, False),  # Xbox served by its own sign-in
+        (False, False, True, False),  # mobile-only
+        (True, True, False, True),  # mobile schedule API not answered yet
+    ],
+)
+async def test_web_session_needed(make_coordinator, xbox, linked, mobile_ok, needed):
+    coord = make_coordinator(xbox=xbox)
+    _link_xbox(coord, linked)
+    coord.web_api = SimpleNamespace(mobile_schedule_ok=mobile_ok)
+    assert coord._web_session_needed is needed
+
+
+async def test_linked_xbox_needs_no_prompt_nor_warm_up(make_coordinator):
+    coord = make_coordinator()
+    _link_xbox(coord)
+    coord.web_api = SimpleNamespace(family_context_state="auth_required", mobile_schedule_ok=True)
+    await coord._async_track_family_context()
+    await coord._async_track_family_context()
+    coord._request_reauth.assert_not_called()
+    assert not await _poll_warms(coord, "auth_required")
+
+
+async def test_linked_xbox_skips_the_same_poll_rewarm(make_coordinator):
+    coord = make_coordinator()
+    _link_xbox(coord)
+    warm = AsyncMock()
+    coord.web_api = SimpleNamespace(family_context_dropped=True, _warm_family_context=warm)
+    await coord._async_rewarm_dropped_family_context()
+    warm.assert_not_called()
+    assert coord.web_api.family_context_dropped is False
+
+
+@pytest.mark.parametrize(("linked", "prompted"), [(True, False), (False, True)])
+async def test_expired_account_session_prompts_only_when_needed(make_coordinator, linked, prompted):
+    coord = make_coordinator()
+    _link_xbox(coord, linked)
+    coord.web_api = SimpleNamespace(
+        family_context_state="ready",
+        has_web_cookies=True,
+        _family_web_backoff_until=0.0,
+        _warm_family_context=AsyncMock(),
+        async_check_web_session=AsyncMock(return_value=False),
+        web_session_state="expired",
+        mobile_schedule_ok=True,
+    )
+    coord._async_load_web_cookies = AsyncMock()
+    coord._async_persist_current_auth = AsyncMock()
+    coord.api = SimpleNamespace(update=AsyncMock(side_effect=StopPoll))
+    with pytest.raises(UpdateFailed):
+        await coord._async_update_data()
+    assert coord._request_reauth.called is prompted
+
+
+async def test_unneeded_reauth_is_withdrawn(make_coordinator, hass):
+    coord = make_coordinator()
+    _link_xbox(coord)
+    coord.web_api = SimpleNamespace(mobile_schedule_ok=True)
+    coord._reauth_requested = True
+    coord._reauth_reason = "web_session_expired"
+    progress = MagicMock(return_value=[
+        {"flow_id": "untouched", "step_id": "reauth_full_confirm"},
+        {"flow_id": "signing-in", "step_id": "check_mobile_proxy"},
+    ])
+    abort = MagicMock()
+    hass.config_entries.flow.async_progress_by_handler = progress
+    hass.config_entries.flow.async_abort = abort
+    await coord._async_withdraw_unneeded_reauth()
+    assert (coord._reauth_requested, coord._reauth_reason) == (False, None)
+    coord._dismiss_auth_notification.assert_awaited_once()
+    abort.assert_called_once_with("untouched")  # a sign-in under way is left alone
+
+
+@pytest.mark.parametrize(
+    ("reason", "linked", "withdrawn"),
+    [("manual", True, False), ("family_context_auth_required", False, False)],
+)
+async def test_reauth_kept_when_asked_for_or_still_needed(make_coordinator, reason, linked, withdrawn):
+    coord = make_coordinator()
+    _link_xbox(coord, linked)
+    coord.web_api = SimpleNamespace(mobile_schedule_ok=True)
+    coord._reauth_requested = True
+    coord._reauth_reason = reason
+    await coord._async_withdraw_unneeded_reauth()
+    assert (coord._reauth_requested is False) is withdrawn
